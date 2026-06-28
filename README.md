@@ -5,23 +5,27 @@ SO101 を lerobot で動かすためのリポジトリ。
 ## セットアップ
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg 
 uv sync
 ```
 
 ## examples
 
-設定は `examples/config.toml`（ポート/ID・補間・IK の重み）に記述する。
-ポートの調べ方: `uv run python -m lerobot.find_port`
+設定は `examples/config.toml`（ポート/ID・補間・IK の重み・カメラインデックス）に記述する。
+
+- ポートの調べ方: `uv run python -m lerobot.scripts.lerobot_find_port`
+- カメラインデックスの調べ方: `uv run python -m lerobot.scripts.lerobot_find_cameras`
 
 | スクリプト | 内容 |
 | --- | --- |
 | `examples/record_and_move.py` | leader の関節角度を記録し、follower を同じ角度へ移動 |
 | `examples/record_and_move_ik.py` | leader の EE(エンドエフェクタ)位置を記録し、IK で解いて follower を移動 |
+| `examples/capture_camera.py` | SO101 付属カメラのライブ映像を表示し、`s` キーで画像を保存 |
 
 ```bash
 uv run python examples/record_and_move.py
 uv run python examples/record_and_move_ik.py
+uv run python examples/capture_camera.py
 ```
 
 ## IK (placo) の注意 — macOS
