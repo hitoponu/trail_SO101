@@ -15,3 +15,11 @@ id = "my_awesome_follower_arm"
 [motion]
 move_duration = 2.0  # 移動にかける時間 [s]
 move_fps = 30        # 補間の更新周波数 [Hz]
+
+# IK（逆運動学）設定 — record_and_move_ik.py で使用
+[kinematics]
+# URDF パス（相対パスはリポジトリのルート基準で解決される）
+urdf_path = "SO101/so101_new_calib.urdf"
+target_frame = "gripper_frame_link"  # エンドエフェクタのフレーム名
+position_weight = 1.0                 # 位置拘束の重み
+orientation_weight = 0.01             # 姿勢拘束の重み（0.0 で位置のみ拘束）
