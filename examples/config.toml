@@ -1,0 +1,17 @@
+# SO101 デバイス設定
+#
+# 各自の環境に合わせて port と id を書き換えてください。
+# ポートの調べ方:  python -m lerobot.find_port
+
+[leader]
+port = "/dev/tty.usbmodem5A7A0176981"
+id = "my_awesome_leader_arm"
+
+[follower]
+port = "/dev/tty.usbmodem58CD1766691"
+id = "my_awesome_follower_arm"
+
+# follower を記録ポーズへ動かすときの補間設定（急な動作を避けるため）
+[motion]
+move_duration = 2.0  # 移動にかける時間 [s]
+move_fps = 30        # 補間の更新周波数 [Hz]
