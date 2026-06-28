@@ -1,0 +1,9 @@
+[project]
+name = "trail-so101"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "lerobot[feetech]>=0.5.1",
+]
