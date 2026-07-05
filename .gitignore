@@ -11,3 +11,7 @@ wheels/
 
 # macOS
 .DS_Store
+
+# images
+captured_images/
+outputs/
