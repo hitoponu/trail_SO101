@@ -45,3 +45,8 @@ done
 ```
 
 `uv sync` 等で cmeel-urdfdom が再インストールされた場合は、上記を再実行する。
+# RPLIDAR A1M8 (ROS 2 / Docker)
+
+RPLIDAR A1M8をROS 2 Jazzyで起動し、2DスキャンをPointCloud2へ変換して
+RViz 2で表示するDocker構成は [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md)
+を参照してください。

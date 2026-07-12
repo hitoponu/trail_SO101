@@ -1,0 +1,11 @@
+.git
+.agents
+.codex
+.env
+.venv
+SO101
+examples
+uv.lock
+docker/rplidar_ros2/.env
+docker/rplidar_ros2/README.md
+docker/rplidar_ros2/99-rplidar.rules
