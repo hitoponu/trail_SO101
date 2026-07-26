@@ -8,11 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg \
       lsb-release \
     && mkdir -p /etc/apt/keyrings \
-    && curl -sSf https://librealsense.intel.com/Debian/librealsense.pgp \
-         | tee /etc/apt/keyrings/librealsense.pgp > /dev/null \
-    && echo "deb [signed-by=/etc/apt/keyrings/librealsense.pgp] \
-         https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" \
-         | tee /etc/apt/sources.list.d/librealsense.list \
+    && curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc \
+         | gpg --dearmor \
+         | tee /etc/apt/keyrings/librealsenseai.gpg > /dev/null \
+    && echo "deb [signed-by=/etc/apt/keyrings/librealsenseai.gpg] \
+         https://librealsense.realsenseai.com/Debian/apt-repo $(lsb_release -cs) main" \
+         > /etc/apt/sources.list.d/librealsense.list \
     && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
