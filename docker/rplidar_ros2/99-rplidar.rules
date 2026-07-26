@@ -1,0 +1,2 @@
+# Common CP210x USB-UART used by RPLIDAR A1. Confirm with `udevadm info` first.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE:="0660", GROUP:="dialout", SYMLINK+="rplidar"

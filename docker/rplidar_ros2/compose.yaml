@@ -1,0 +1,36 @@
+services:
+  rplidar:
+    build:
+      context: ../..
+      dockerfile: docker/rplidar_ros2/Dockerfile
+      args:
+        SLLIDAR_ROS2_REF: ${SLLIDAR_ROS2_REF:-main}
+    image: local/rplidar-a1-ros2:jazzy
+    container_name: rplidar-a1
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      # Containers do not always have access to the host's /dev/dri device.
+      # Use Mesa software rendering by default; set to 0 in .env when passing a GPU.
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    devices:
+      - ${RPLIDAR_DEVICE:-/dev/ttyUSB0}:${RPLIDAR_DEVICE:-/dev/ttyUSB0}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command:
+      - ros2
+      - launch
+      - rplidar_bringup
+      - a1_points.launch.py
+      - serial_port:=${RPLIDAR_DEVICE:-/dev/ttyUSB0}
+      - start_rviz:=${START_RVIZ:-true}
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
