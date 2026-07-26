@@ -13,3 +13,6 @@ wheels/
 .DS_Store
 
 *.env
+# images
+captured_images/
+outputs/
