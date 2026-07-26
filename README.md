@@ -45,8 +45,20 @@ done
 ```
 
 `uv sync` 等で cmeel-urdfdom が再インストールされた場合は、上記を再実行する。
-# RPLIDAR A1M8 (ROS 2 / Docker)
 
-RPLIDAR A1M8をROS 2 Jazzyで起動し、2DスキャンをPointCloud2へ変換して
-RViz 2で表示するDocker構成は [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md)
-を参照してください。
+## ROS 2 (Docker)
+
+ROS 2 Jazzy の構成は `docker/` 以下にまとめてある。いずれも **Linux ホスト**が前提
+（macOS の Docker はシリアル/USB デバイスをコンテナへ渡せないため）。
+
+| 対象 | 内容 | ドキュメント |
+| --- | --- | --- |
+| LeKiwi ベース | 3輪オムニベースを `/cmd_vel` で駆動し、オドメトリと TF を出す | [docker/lekiwi_base_ros2/README.md](docker/lekiwi_base_ros2/README.md) |
+| RPLIDAR A1M8 | 2DスキャンをPointCloud2へ変換してRViz 2で表示 | [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md) |
+| RealSense D435i | D435i を起動してRViz 2で表示 | [docker/realsense_ros2/README.md](docker/realsense_ros2/README.md) |
+
+ROS 2 パッケージの実体は `ros2_ws/src/` にある。
+
+> **LeKiwi ベースの安全上の注意**: この機体は 7.4V 版アームと 12V 版ホイールの
+> 混在構成のため、**12V 給電中にアーム（モータ ID 1〜6）をバスへ繋いではいけない**。
+> 詳細は上記 README を参照。

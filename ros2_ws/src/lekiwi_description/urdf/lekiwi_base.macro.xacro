@@ -1,0 +1,274 @@
+<?xml version="1.0"?>
+<!--
+  LeKiwi 3輪オムニ移動ベースの記述。
+
+  ■ 座標系 (REP-103: +x 前方 / +y 左 / +z 上)
+
+  寸法は SIGRobotics-UIUC/LeKiwi の CAD エクスポート (URDF/LeKiwi.urdf) から
+  抽出したが、CAD の座標系は base_link とは Z 軸まわりに 90° ずれている。
+
+    base_link は CAD 座標系を Z まわりに +90° 回したもの
+    → CAD 座標を base_link へ写すには (x_b, y_b) = (y_c, -x_c)
+
+  この換算は lerobot の運動学 (lerobot/robots/lekiwi/lekiwi.py の
+  _body_to_wheel_raw) と突き合わせて確定した。lerobot の行列は
+
+    angles = radians([240, 0, 120] - 90) = [150°, -90°, 30°]   (left, back, right)
+    m[i] = [cos(a_i), sin(a_i), base_radius]
+
+  で、標準キウイドライブ式 v = -sin(φ)·vx + cos(φ)·vy + R·wz と係数比較すると
+  a = φ + 90°、すなわち車輪の方位角 φ は base_link 上で下記のとおり。
+
+    left(ID 7) = 60°,  back(ID 8) = 180°,  right(ID 9) = 300°
+
+  検算: CAD のカメラマウント (0.02, 0.1, 0) → base_link (0.1, -0.02) で +x 側 = 前方。
+        バックホイールは 180° = 後方。名前と配置が一致する。
+
+  ★ ここの方位角と lekiwi_base_bringup の config/base.yaml の
+    wheel_angle_offset_deg は同じ規約から導かれている。片方だけ変えないこと。
+
+  ■ CAD 側のバグについて
+  CAD ではバックホイール取付原点が (-0.02, -0.1, 0) だが、対称配置なら
+  (-0.02, -0.08, 0) が正しい (穴ピッチ 1 つ = 20mm 分だけ外側にずれている)。
+  実測半径は 0.142 / 0.123 / 0.122 m と不揃いになるため、ここでは対称な
+  base_radius 単一値を使う。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="lekiwi_base"
+               params="prefix:=''
+                       use_mesh:=false
+                       wheel_radius:=0.05
+                       base_radius:=0.125">
+
+    <!-- ================= 寸法 (CAD 由来) ================= -->
+
+    <!-- 車軸の高さ。base_link 原点 (= CAD 原点) からの実測値 -->
+    <xacro:property name="axle_z" value="0.01786"/>
+
+    <!-- 接地面から base_link までの高さ。
+         CAD 実測では 0.032924 m (このとき車輪半径 0.050784 m)。
+         wheel_radius から導出しておけば、公称 0.05 を使っても車輪が
+         きっちり接地する。 -->
+    <xacro:property name="base_link_z" value="${wheel_radius - axle_z}"/>
+
+    <xacro:property name="wheel_width" value="0.026"/>  <!-- 仮値: 見た目のみ -->
+
+    <!-- ベースプレート: CAD bbox [-107.9,-105,-7]..[107.9,107.9,0] mm -->
+    <xacro:property name="plate_size" value="0.216"/>
+    <xacro:property name="plate_thickness" value="0.007"/>
+
+    <!-- 第2プレート: base_link から +0.05 m -->
+    <xacro:property name="plate2_z" value="0.05"/>
+
+    <!-- CAD 座標系 → base_link の回転。メッシュを使う場合に必要 -->
+    <xacro:property name="cad_yaw" value="${-pi/2}"/>
+
+    <!-- ★ TBD: 実測待ち。RViz でマゼンタ表示されるので未確定と分かる ★ -->
+    <xacro:property name="laser_xyz_TBD" value="0 0 0.09"/>
+    <xacro:property name="laser_rpy_TBD" value="0 0 0"/>
+    <!-- カメラマウントは CAD 由来 (CAD (0.02, 0.1, 0) → base_link (0.1, -0.02, 0))。
+         光学フレームのオフセットは未実測。 -->
+    <xacro:property name="camera_xyz_TBD" value="0.1 -0.02 0.05"/>
+    <xacro:property name="camera_rpy_TBD" value="0 0 0"/>
+
+    <!-- ================= マテリアル ================= -->
+
+    <material name="lekiwi_plate">
+      <color rgba="0.25 0.27 0.30 1.0"/>
+    </material>
+    <material name="lekiwi_wheel">
+      <color rgba="0.15 0.15 0.17 1.0"/>
+    </material>
+    <material name="lekiwi_tbd">
+      <!-- 未実測フレームの目印。RViz で目立つマゼンタ -->
+      <color rgba="1.0 0.0 0.8 0.6"/>
+    </material>
+
+    <!-- ================= ベース ================= -->
+
+    <link name="${prefix}base_footprint"/>
+
+    <joint name="${prefix}base_footprint_joint" type="fixed">
+      <origin xyz="0 0 ${base_link_z}" rpy="0 0 0"/>
+      <parent link="${prefix}base_footprint"/>
+      <child link="${prefix}base_link"/>
+    </joint>
+
+    <link name="${prefix}base_link">
+      <visual>
+        <xacro:unless value="${use_mesh}">
+          <origin xyz="0 0 ${-plate_thickness/2}" rpy="0 0 0"/>
+          <geometry>
+            <box size="${plate_size} ${plate_size} ${plate_thickness}"/>
+          </geometry>
+          <material name="lekiwi_plate"/>
+        </xacro:unless>
+        <xacro:if value="${use_mesh}">
+          <!-- メッシュは CAD 座標系で作られているので cad_yaw で回す -->
+          <origin xyz="0 0 0" rpy="0 0 ${cad_yaw}"/>
+          <geometry>
+            <mesh filename="package://lekiwi_description/meshes/base_plate_layer1-v5.stl"
+                  scale="0.001 0.001 0.001"/>
+          </geometry>
+          <material name="lekiwi_plate"/>
+        </xacro:if>
+      </visual>
+      <collision>
+        <!-- 衝突形状はメッシュを使う場合でも基本図形のまま。
+             CAD の車輪メッシュは 31 万ポリゴンあり衝突判定には使えない。 -->
+        <origin xyz="0 0 ${-plate_thickness/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${plate_size} ${plate_size} ${plate_thickness}"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <!-- CAD の慣性値は単一密度エクスポートで物理的に誤り
+             (総重量 17 kg vs 実機 ~4 kg) なので流用せず概算値を置く。 -->
+        <origin xyz="0 0 0.01" rpy="0 0 0"/>
+        <mass value="2.0"/>
+        <inertia ixx="0.013" ixy="0.0" ixz="0.0" iyy="0.013" iyz="0.0" izz="0.024"/>
+      </inertial>
+    </link>
+
+    <!-- 第2プレート (アームとカメラが載る段) -->
+    <joint name="${prefix}base_plate2_joint" type="fixed">
+      <origin xyz="0 0 ${plate2_z}" rpy="0 0 0"/>
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}base_plate2_link"/>
+    </joint>
+
+    <link name="${prefix}base_plate2_link">
+      <visual>
+        <origin xyz="0 0 ${-plate_thickness/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${plate_size} ${plate_size} ${plate_thickness}"/>
+        </geometry>
+        <material name="lekiwi_plate"/>
+      </visual>
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.3"/>
+        <inertia ixx="0.0012" ixy="0.0" ixz="0.0" iyy="0.0012" iyz="0.0" izz="0.0023"/>
+      </inertial>
+    </link>
+
+    <!-- ================= 車輪 ================= -->
+
+    <!--
+      車輪ジョイントの向き:
+        origin rpy="0 pi/2 phi" で Rz(phi)·Ry(pi/2) となり、ローカル +z が
+        (cos phi, sin phi, 0) すなわち半径方向の車軸に一致する。
+        円柱もローカル +z が軸なのでそのまま使える。
+
+      回転の正方向は RViz 上の見た目にしか影響しない。実際のモータ回転方向は
+      lekiwi_base_bringup の wheel_direction_signs で実機合わせする。
+    -->
+    <xacro:macro name="omni_wheel" params="name phi">
+      <joint name="${prefix}base_${name}_wheel_joint" type="continuous">
+        <origin xyz="${base_radius * cos(radians(phi))}
+                     ${base_radius * sin(radians(phi))}
+                     ${axle_z}"
+                rpy="0 ${pi/2} ${radians(phi)}"/>
+        <parent link="${prefix}base_link"/>
+        <child link="${prefix}base_${name}_wheel_link"/>
+        <axis xyz="0 0 1"/>
+        <dynamics damping="0.01" friction="0.0"/>
+      </joint>
+
+      <link name="${prefix}base_${name}_wheel_link">
+        <visual>
+          <xacro:unless value="${use_mesh}">
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+              <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+            </geometry>
+            <material name="lekiwi_wheel"/>
+          </xacro:unless>
+          <xacro:if value="${use_mesh}">
+            <!-- 車輪 STL はローカル +z が車軸なのでリンク座標系とそのまま一致する -->
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+              <mesh filename="package://lekiwi_description/meshes/omni_wheel.stl"
+                    scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="lekiwi_wheel"/>
+          </xacro:if>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+          </geometry>
+        </collision>
+        <inertial>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <mass value="0.1"/>
+          <inertia ixx="7.0e-5" ixy="0.0" ixz="0.0" iyy="7.0e-5" iyz="0.0" izz="1.25e-4"/>
+        </inertial>
+      </link>
+    </xacro:macro>
+
+    <!-- 方位角は上のコメントの導出どおり。モータ ID は 7 / 8 / 9 -->
+    <xacro:omni_wheel name="left"  phi="60"/>    <!-- ID 7 -->
+    <xacro:omni_wheel name="back"  phi="180"/>   <!-- ID 8 -->
+    <xacro:omni_wheel name="right" phi="300"/>   <!-- ID 9 -->
+
+    <!-- ================= センサ取付フレーム (未実測) ================= -->
+
+    <!--
+      ★ laser_link の位置は未実測。RPLIDAR A1 を載せたら実測して差し替えること。
+        sllidar_ros2 の frame_id は既定で "laser" なので、
+        rplidar_bringup と併用する場合はここの名前と合わせる。
+    -->
+    <joint name="${prefix}laser_joint" type="fixed">
+      <origin xyz="${laser_xyz_TBD}" rpy="${laser_rpy_TBD}"/>
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}laser_link"/>
+    </joint>
+
+    <link name="${prefix}laser_link">
+      <visual>
+        <geometry>
+          <box size="0.03 0.03 0.02"/>
+        </geometry>
+        <material name="lekiwi_tbd"/>
+      </visual>
+    </link>
+
+    <!--
+      ★ camera_mount_link の xy は CAD 由来 (CAD (0.02, 0.1, 0) → (0.1, -0.02))
+        だが z と光学フレームのオフセットは未実測。
+
+        名前を camera_link にしないこと: realsense2_description が
+        camera_link を使うため、将来 RealSense と統合したときに衝突する。
+    -->
+    <joint name="${prefix}camera_mount_joint" type="fixed">
+      <origin xyz="${camera_xyz_TBD}" rpy="${camera_rpy_TBD}"/>
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}camera_mount_link"/>
+    </joint>
+
+    <link name="${prefix}camera_mount_link">
+      <visual>
+        <geometry>
+          <box size="0.02 0.03 0.02"/>
+        </geometry>
+        <material name="lekiwi_tbd"/>
+      </visual>
+    </link>
+
+    <!--
+      アーム取付位置 (将来用)。CAD (0.04, 0.08, 0.057) → base_link (0.08, -0.04, 0.057)。
+      現在アームは 12V バス保護のため物理的に切り離してある。
+    -->
+    <joint name="${prefix}arm_mount_joint" type="fixed">
+      <origin xyz="0.08 -0.04 0.057" rpy="0 0 0"/>
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}arm_mount_link"/>
+    </joint>
+
+    <link name="${prefix}arm_mount_link"/>
+
+  </xacro:macro>
+</robot>

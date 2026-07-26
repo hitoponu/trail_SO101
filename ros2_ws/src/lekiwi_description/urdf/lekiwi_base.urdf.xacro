@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!--
+  LeKiwi ベースのトップレベル記述。
+
+    xacro lekiwi_base.urdf.xacro                     # 基本図形
+    xacro lekiwi_base.urdf.xacro use_mesh:=true      # CAD メッシュ (要 meshes/)
+
+  use_mesh:=true を使うには lekiwi_description/meshes/ に STL を置く必要がある。
+  リポジトリ肥大 (オムニホイール 1 個で 15.7MB / 31 万ポリゴン) を避けるため
+  既定では同梱していない。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
+
+  <xacro:arg name="prefix" default=""/>
+  <xacro:arg name="use_mesh" default="false"/>
+  <xacro:arg name="wheel_radius" default="0.05"/>
+  <xacro:arg name="base_radius" default="0.125"/>
+
+  <xacro:include filename="$(find lekiwi_description)/urdf/lekiwi_base.macro.xacro"/>
+
+  <xacro:lekiwi_base
+      prefix="$(arg prefix)"
+      use_mesh="$(arg use_mesh)"
+      wheel_radius="$(arg wheel_radius)"
+      base_radius="$(arg base_radius)"/>
+
+</robot>

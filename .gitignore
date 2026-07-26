@@ -16,3 +16,11 @@ wheels/
 # images
 captured_images/
 outputs/
+
+# colcon
+ros2_ws/install/
+ros2_ws/log/
+
+# 参照用にクローンした LeKiwi 公式リポジトリ (独立した git リポジトリ、約289MB)。
+# ros2_ws のパッケージはこれに依存しないので、追跡しない。
+LeKiwi/
