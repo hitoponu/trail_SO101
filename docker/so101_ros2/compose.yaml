@@ -1,0 +1,59 @@
+services:
+  so101-follower:
+    build:
+      context: ../..
+      dockerfile: docker/so101_ros2/Dockerfile
+    image: local/so101-ros2:jazzy
+    container_name: so101-follower
+    # tini を PID 1 に置く。シグナルを子プロセスへ転送し、ゾンビを回収する。
+    init: true
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      # Containers do not always have access to the host's /dev/dri device.
+      # Use Mesa software rendering by default; set to 0 in .env when passing a GPU.
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    devices:
+      # 既定が /dev/null なのは意図的。常に存在するので、何も繋がっていない
+      # ラップトップでも mock_components のドライランが実行できる。
+      - ${SO101_DEVICE:-/dev/null}:${SO101_DEVICE:-/dev/null}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command:
+      - ros2
+      - launch
+      - so101_bringup
+      - follower.launch.py
+      - ros2_control_hardware_type:=${HARDWARE_TYPE:-mock_components}
+      - usb_port:=${SO101_DEVICE:-/dev/null}
+      - start_rviz:=${START_RVIZ:-true}
+    # ★ 自動再起動しない。クラッシュ後に勝手にトルクが入り、サーボに残っている
+    #   古い Goal_Position へアームが飛ぶのは危険。
+    restart: "no"
+    # ★ rclpy / controller_manager がネイティブに扱うのは SIGINT。
+    #   既定の SIGTERM では on_deactivate が走らない。
+    stop_signal: SIGINT
+    stop_grace_period: 20s
+    #
+    # ★★ 安全上の論理が LeKiwi ベースとは逆転している ★★
+    #
+    #   LeKiwi (docker/lekiwi_base_ros2):
+    #     強制終了 = ホイールが最後の指令速度で回り続ける (危険)
+    #     正常終了 = 速度ゼロ + トルクOFF     (安全)
+    #
+    #   SO-101 アーム (ここ):
+    #     強制終了 (SIGKILL) = トルクが入ったまま。アームはその場で凍結する
+    #     正常終了 (SIGINT)  = feetech_ros2_driver の on_deactivate が全関節の
+    #                          トルクを切る -> **アームは脱力して落ちる**
+    #
+    #   つまりアームでは「正常終了」の方が落下を伴う。停止する前に必ず低く
+    #   畳んだ姿勢へ動かすこと。詳細は README.md の「安全上の注意」を参照。
+    stdin_open: true
+    tty: true

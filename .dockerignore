@@ -6,6 +6,19 @@
 SO101
 examples
 uv.lock
+
+# LeKiwi 公式リポジトリのクローン (CAD/メッシュで約 289MB)。
+# 未追跡かつビルドには不要だが、除外しないと全イメージのビルドで毎回転送される。
+LeKiwi
+
+captured_images
+outputs
+.DS_Store
+**/__pycache__
+
 docker/rplidar_ros2/.env
 docker/rplidar_ros2/README.md
 docker/rplidar_ros2/99-rplidar.rules
+docker/so101_ros2/.env
+docker/so101_ros2/README.md
+docker/so101_ros2/99-so101.rules

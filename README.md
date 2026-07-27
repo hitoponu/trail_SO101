@@ -45,8 +45,18 @@ done
 ```
 
 `uv sync` 等で cmeel-urdfdom が再インストールされた場合は、上記を再実行する。
-# RPLIDAR A1M8 (ROS 2 / Docker)
 
-RPLIDAR A1M8をROS 2 Jazzyで起動し、2DスキャンをPointCloud2へ変換して
-RViz 2で表示するDocker構成は [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md)
-を参照してください。
+## ROS 2 (Docker)
+
+ROS 2 Jazzy の構成は `docker/` 以下にまとめてある。ROS 2 パッケージの実体は
+`ros2_ws/src/` にある。実機制御は **Linux ホスト**が前提
+（macOS の Docker はシリアル/USB デバイスをコンテナへ渡せないため）。
+
+| 対象 | 内容 | ドキュメント |
+| --- | --- | --- |
+| SO-101 フォロワアーム | 単体アームを `ros2_control` で駆動し、`FollowJointTrajectory` とグリッパを提供 | [docker/so101_ros2/README.md](docker/so101_ros2/README.md) |
+| RPLIDAR A1M8 | 2DスキャンをPointCloud2へ変換してRViz 2で表示 | [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md) |
+
+> **SO-101 アームの安全上の注意**: 正常終了（`Ctrl+C` / `docker compose down`）で
+> **トルクが切れてアームが落ちる**。停止前に必ず低く畳んだ姿勢へ動かすこと。
+> 詳細は上記 README の冒頭を参照。

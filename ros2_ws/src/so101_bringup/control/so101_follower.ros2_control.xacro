@@ -1,0 +1,104 @@
+<?xml version="1.0" ?>
+<!--
+  SO-101 follower 用の ros2_control 記述。
+
+  ■ なぜ上流のファイルを使わないのか
+
+  上流 (ros-physical-ai/ros2_so_arm) の
+  so_arm101_description/control/so_arm101.ros2_control.xacro には、
+  feetech_ros2_driver v0.2.2 のソースと突き合わせて確認した実バグが3つある:
+
+    1. <param name="offset">2048</param> を設定しているが、driver 側で offset は
+       **非推奨で無視される**。起動時に警告が6回出るだけで何も反映されない。
+    2. PID パラメータの綴りが "p_cofficient" (e が抜けている)。driver は
+       "p_coefficient" を探すので、**PID 値は一切書き込まれない**。
+    3. joint_config_file のハードウェアパラメータが無いため、
+       **較正 YAML を渡す口が無い**。
+
+  幸い上流の親 xacro (so_arm101.urdf.xacro) には ros2_control_file:= という
+  差し替え用の引数があるので、URDF 本体はフォークせずこのファイルだけを渡す。
+  マクロ名と引数 (prefix ros2_control_hardware_type usb_port) は上流と同一に保つこと。
+
+  ■ 設計方針
+
+  関節ごとに書くのは **id だけ**。PID・加速度・保護電流・較正値はすべて
+  config/so101_joints.yaml 側に置く。driver は YAML を **joint 名ではなく id**
+  で突合せ、YAML が URDF より優先される。設定が二箇所に散らないようにする。
+
+  mujoco / gazebo の分岐は落としてある (スコープ外。かつ mujoco 分岐は
+  MuJoCo ランタイムを同梱していないのに mjcf/scene.xml を参照してしまう)。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg
+    name="joint_config_file"
+    default="$(find so101_bringup)/config/so101_joints.yaml"
+  />
+
+  <xacro:macro
+    name="ros2_control"
+    params="prefix ros2_control_hardware_type usb_port"
+  >
+    <ros2_control name="SO_ARM101" type="system">
+      <hardware>
+        <xacro:if value="${ros2_control_hardware_type == 'mock_components'}">
+          <!-- 実機に一切触れないドライラン用。全関節ゼロから始まる。 -->
+          <plugin>mock_components/GenericSystem</plugin>
+        </xacro:if>
+        <xacro:if value="${ros2_control_hardware_type == 'real'}">
+          <plugin>feetech_ros2_driver/FeetechHardwareInterface</plugin>
+          <param name="usb_port">${usb_port}</param>
+          <!-- ★ 上流に無い。較正値と調整値はすべてこの YAML から入る。 -->
+          <param name="joint_config_file">$(arg joint_config_file)</param>
+        </xacro:if>
+      </hardware>
+
+      <!--
+        関節の並びは URDF (so_arm101_macro.xacro) と、
+        config/ros2_controllers.yaml の joints リストに一致させること。
+        id 1-6 は lerobot の SO-101 の割り当てと同じ。
+      -->
+      <joint name="${prefix}shoulder_pan_joint">
+        <param name="id">1</param>
+        <command_interface name="position" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+
+      <joint name="${prefix}shoulder_lift_joint">
+        <param name="id">2</param>
+        <command_interface name="position" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+
+      <joint name="${prefix}elbow_flex_joint">
+        <param name="id">3</param>
+        <command_interface name="position" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+
+      <joint name="${prefix}wrist_flex_joint">
+        <param name="id">4</param>
+        <command_interface name="position" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+
+      <joint name="${prefix}wrist_roll_joint">
+        <param name="id">5</param>
+        <command_interface name="position" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+
+      <joint name="${prefix}gripper_joint">
+        <param name="id">6</param>
+        <command_interface name="position" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+    </ros2_control>
+  </xacro:macro>
+</robot>

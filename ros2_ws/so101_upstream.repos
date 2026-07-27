@@ -1,0 +1,18 @@
+# SO-101 用に取り込む上流リポジトリ。docker/so101_ros2/Dockerfile が
+# ビルド中に `vcs import src < この定義` で展開する。
+#
+# なぜ vendored コピー (git にコミット) にしないか:
+#   so_arm101_description/meshes/*.stl は、既にこのリポジトリで追跡している
+#   SO101/assets/*.stl と **バイト単位で同一** (13ファイル、約16MB)。
+#   コミットすると同じバイト列を二重に git 履歴へ入れることになる。
+#   実体は .gitignore の ros2_ws/src/ros2_so_arm/ で追跡から外している。
+#
+# version はブランチ名ではなく **コミット SHA で固定** する。
+# 上流を更新するときはここの SHA だけを書き換え、必ず再検証すること
+# (上流の ros2_control xacro には既知のバグが3つあり、こちらで差し替えている。
+#  docker/so101_ros2/README.md と so101_bringup/control/ を参照)。
+repositories:
+  ros2_so_arm:
+    type: git
+    url: https://github.com/ros-physical-ai/ros2_so_arm.git
+    version: e166df9d51f43b24da9b99047c6c51c306bda74f

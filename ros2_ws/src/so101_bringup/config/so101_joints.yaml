@@ -1,0 +1,84 @@
+# SO-101 follower (単体機) の Feetech サーボ設定。
+# feetech_ros2_driver の joint_config_file として読まれる。
+#
+# ★ 突合せは「関節名」ではなく **servo id** で行われる (driver の仕様)。
+#   ここのキー名は人間向けのラベルにすぎない。
+# ★ YAML の値は URDF の <param> より **優先される**。
+#
+# ─────────────────────────────────────────────────────────────────
+# Phase 1: homing_offset / range_min / range_max を意図的に書いていない
+# ─────────────────────────────────────────────────────────────────
+# サーボの EEPROM には lerobot が較正時に書いた値が既に入っている
+# (~/.cache/huggingface/lerobot/calibration/robots/so_follower/*.json と同じ値)。
+# これらを省略すると driver はそのレジスタに触れないので、
+# **ROS は lerobot とまったく同じ値を読む**。
+# 現に動いている lerobot 構成と等価であることが保証されるので、
+# 初回の実機起動はこの状態で行う。
+#
+# ゼロ点を実測して明示的に書く手順 (Phase 2) は
+# docker/so101_ros2/README.md の「ゼロ点と回転方向を測る」を参照。
+# so101_calib が JSON と実測 Δ から下記に homing_offset / range_* を足した
+# ファイルを生成する。
+#
+# ─────────────────────────────────────────────────────────────────
+# lerobot のグリッパ 0-100 表現について
+# ─────────────────────────────────────────────────────────────────
+# lerobot はグリッパを 0(閉)-100(開) の百分率で扱うが、ROS 側では
+# 単なる revolute 関節 (ラジアン) である。将来 lerobot ブリッジを足すときは
+#   pct = (tick - range_min) / (range_max - range_min) * 100
+# で明示的に変換すること。暗黙に一致していると思ってはいけない。
+
+joints:
+  shoulder_pan:
+    id: 1
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    # driver は write() ごとに accel=50 をハードコードで送るが、
+    # ここの値は EEPROM に書かれ既定の加減速に効く。
+    # 20 は LeKiwi のサーボで実績のある値 (lekiwi_base_bringup/config/base.yaml)。
+    acceleration: 20
+
+  shoulder_lift:
+    id: 2
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 20
+
+  elbow_flex:
+    id: 3
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 20
+
+  wrist_flex:
+    id: 4
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 20
+
+  wrist_roll:
+    id: 5
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 20
+
+  gripper:
+    id: 6
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 20
+    # 物を掴んで止まったときにサーボを焼かないための保護。
+    protection_current: 200
+    overload_torque: 40
