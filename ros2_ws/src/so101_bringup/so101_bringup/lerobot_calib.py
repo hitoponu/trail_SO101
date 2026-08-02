@@ -116,9 +116,11 @@ def wrap_homing(value: int) -> int:
     ゼロがエンコーダの折り返し点付近にある関節では、素朴に Δ を足すと
     ±2047 のレジスタ範囲を超えるが、折り返せば表現できる。
 
-    (この mod 演算はファームの実測挙動から確認済み: homing=2012 / 記録範囲
-     1014..3350 の関節で、Actual が 4096 をまたぐのに Present が連続かつ
-     range_max=3350 になるのは mod 4096 でラップしているときだけ。)
+    ★ ただし **サーボが本当にラップするかは未確認**。lerobot が記録した
+      range から間接的に示唆されるだけで、実機で検証していない。
+      ラップしない場合、可動端で Present が 4095 を超えた値として報告され、
+      q_ros が数 rad の異常値になって RViz が破綻する。
+      そのため既定では折り返さず、--allow-homing-wrap で明示的に選ぶ。
     """
     return ((value + 2048) % 4096) - 2048
 
@@ -235,7 +237,7 @@ def parse_deltas(text: str) -> dict[str, int]:
 
 
 def convert(
-    calib: dict, deltas: dict[str, int], emit_ranges: bool
+    calib: dict, deltas: dict[str, int], emit_ranges: bool, allow_wrap: bool = False
 ) -> tuple[dict, list[str], list[str]]:
     joints: dict[str, dict] = {}
     errors: list[str] = []
@@ -249,21 +251,29 @@ def convert(
         entry = calib[name]
         delta = deltas.get(name, 0)
 
-        raw_homing = int(entry["homing_offset"]) + delta
-        homing = wrap_homing(raw_homing)
-        if homing != raw_homing:
-            # ゼロがエンコーダの折り返し点付近にある関節で起きる。
-            # サーボは Present = (Actual - homing) mod 4096 で計算するので、
-            # 4096 ずらした値は完全に等価。レジスタに収まる表現を選ぶだけ。
+        homing = int(entry["homing_offset"]) + delta
+        if abs(homing) > MAX_HOMING_OFFSET and allow_wrap:
+            wrapped = wrap_homing(homing)
             notes.append(
-                f"{name}: homing_offset {raw_homing} はレジスタ範囲外なので"
-                f" {homing} に折り返した (mod 4096 で等価)。"
-                " この関節はゼロがエンコーダの折り返し点付近にある"
+                f"{name}: homing_offset {homing} を {wrapped} へ折り返した"
+                " (--allow-homing-wrap)。★実機で q_ros が異常値になっていないか"
+                " 必ず so101_probe で確認すること"
             )
+            homing = wrapped
         if abs(homing) > MAX_HOMING_OFFSET:
+            over = abs(homing) - MAX_HOMING_OFFSET
             errors.append(
-                f"{name}: homing_offset={homing} が ±{MAX_HOMING_OFFSET} を超える。"
-                " driver が on_init でクラッシュするので却下する"
+                f"{name}: homing_offset={homing} が ±{MAX_HOMING_OFFSET} を"
+                f"{over} tick 超える (driver が on_init でクラッシュするので却下)。\n"
+                f"    原因: この関節はゼロがエンコーダの折り返し点付近にあり、\n"
+                f"          現在の homing_offset={int(entry['homing_offset'])} がそれを吸収している。\n"
+                f"    対処 A: --delta {name}=0 で補正を諦める"
+                f" (この関節が {delta * 360 / 4096:+.1f}° ずれたままになる)\n"
+                f"    対処 B: この関節を URDF ゼロ姿勢付近に置いて lerobot の較正をやり直す\n"
+                f"    対処 C: --allow-homing-wrap で 4096 折り返した等価値を使う。\n"
+                f"            ただしサーボが Present をラップしない場合、可動端で\n"
+                f"            q_ros が数 rad の異常値になり RViz が破綻する。\n"
+                f"            適用後に必ず so101_probe --scan で q_ros を確認すること"
             )
 
         out: dict = {"id": int(entry["id"])}
@@ -350,6 +360,13 @@ def main() -> None:
         " 例: shoulder_pan=0,gripper=-790",
     )
     parser.add_argument(
+        "--allow-homing-wrap",
+        action="store_true",
+        help="homing_offset がレジスタ範囲外のとき 4096 折り返した等価値を使う。"
+        " ★サーボが Present をラップしない場合 RViz が破綻するので、適用後に"
+        " so101_probe --scan で q_ros を必ず確認すること",
+    )
+    parser.add_argument(
         "--emit-ranges",
         action="store_true",
         help="range_min/range_max も書き出す (既定では homing_offset のみ)",
@@ -390,7 +407,7 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    joints, errors, notes = convert(calib, deltas, args.emit_ranges)
+    joints, errors, notes = convert(calib, deltas, args.emit_ranges, args.allow_homing_wrap)
     for note in notes:
         print(f"# 注意: {note}", file=sys.stderr)
     if errors:
