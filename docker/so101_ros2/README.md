@@ -394,7 +394,7 @@ gripper        Δ =  -790 tick ( -69.4°)
 
 1. 6.2 で生成した設定で手順7へ進んで起動する
 2. RViz と実物を見比べ、ずれている関節について「何度ずれているか」だけ目測する
-3. `Δ[tick] = ずれ角[°] × 11.38` を足して `so101_joints.yaml` を更新、再ビルド
+3. `Δ[tick] = ずれ角[°] × 11.38` を足して `so101_offsets.xacro` を更新、再起動
 4. 再起動して確認。必要なら繰り返す
 
 **絶対姿勢を作るのではなく「差」を読むだけ**なので、目測でも十分な精度が出ます。
@@ -404,88 +404,77 @@ gripper        Δ =  -790 tick ( -69.4°)
 
 ### 6.5 設定ファイルへ反映する
 
-`so101_calib` は **YAML を標準出力へ吐く**だけなので、リダイレクトでファイルにします。
-診断メッセージは標準エラーへ出るので、ファイルには混ざりません。
+`so101_calib` は **offset を xacro 形式で標準出力へ吐く**だけなので、
+リダイレクトでファイルにします。診断メッセージは標準エラーへ出るので混ざりません。
 
-このディレクトリ（`docker/so101_ros2`）から実行する場合:
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_calib \
-    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
-  > ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml
-
-docker compose build
-```
-
-**いきなり上書きせず、一度確認してからにするほうが安全です。**
+このディレクトリ（`docker/so101_ros2`）から:
 
 ```bash
 docker compose run --rm so101-follower \
   ros2 run so101_bringup so101_calib \
-    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
-  > /tmp/so101_joints.yaml
-
-diff -u ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml /tmp/so101_joints.yaml
-cp /tmp/so101_joints.yaml ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml
-docker compose build
+    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
+  > ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro
 ```
 
-> `-o` オプションは**コンテナ内**のパスに書くのでホストからは見えません。
-> ホストのファイルにしたい場合は上記のリダイレクトを使ってください。
-
-出来上がるのはこういうファイルです（先頭のコメントに Δ の内訳が残ります）。
-
-```yaml
-# so101_calib が生成したファイル (Phase 2: ゼロ点を実測して明示的に書いた状態)。
-#   実測 Δ: {'shoulder_pan': 62, 'shoulder_lift': -11, 'elbow_flex': -120, ...}
-joints:
-  shoulder_pan:
-    id: 1
-    p_coefficient: 16
-    ...
-    homing_offset: 530
-    range_min: 812
-    range_max: 3533
-```
-
-Δ を手で与えたい／6.4 で補正した分を足したい場合は `--delta` を併用します。
-`--from-ranges` の結果を関節ごとに上書きできます。
+**いきなり上書きせず、一度確認するほうが安全です。**
 
 ```bash
-    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
-    --delta wrist_roll=-25,elbow_flex=-140
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_calib \
+    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
+  > /tmp/so101_offsets.xacro
+
+diff -u ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro /tmp/so101_offsets.xacro
+cp /tmp/so101_offsets.xacro ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro
 ```
 
-生成されたファイルは `homing_offset` が `±2047` を超えないこと、
-`range_*` が `0..4095` に収まることを自動で検査します（超えると却下されます。
-ドライバが `on_init` でクラッシュするためです）。
+出来上がるのはこういうファイルです。
 
-`docker compose build` を忘れると設定が反映されません
-（イメージ内の `install/` にコピーされるため）。
+```xml
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:property name="so101_offset_shoulder_pan" value="2052"/>  <!-- Δ=+4 -->
+  <xacro:property name="so101_offset_shoulder_lift" value="1978"/>  <!-- Δ=-70 -->
+  ...
+</robot>
+```
+
+反映のさせ方は使っているモードによります。
+
+| モード | 反映方法 |
+| --- | --- |
+| 開発用オーバーレイ（`-f compose.dev.yaml`） | **再起動だけ** |
+| 素の `compose.yaml` | `docker compose build` |
+
+`--delta` で関節ごとに上書きできます（`wrist_roll` はこれで与えます）。
+
+```bash
+    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
+    --delta wrist_roll=68
+```
+
+> **`offset` はサーボの EEPROM には書きません。** driver v0.2.2 の
+> `offset` はソフト側だけで完結する値で、`read/write` の変換に使われるだけです。
+> 較正値（`homing_offset` / `range_*`）は lerobot が書いたものが無傷で残ります。
+> **設定を間違えても壊れないのが、この方式の利点です。**
 
 ### 6.6 lerobot の較正 JSON は必須ではない
 
 **較正値の実体はサーボの EEPROM にあり、JSON はその控えにすぎません。**
 
-ドライバは `homing_offset` / `range_min` / `range_max` が設定に書かれている
-ときだけ該当レジスタを書きます（`configure_joints_` は各パラメータについて
-「キーが存在すれば書く」という実装）。既定の `so101_joints.yaml` は
-**Phase 1**（これらを書かない）状態なので、**JSON が手元に無くても動きます。**
-サーボに入っている較正値がそのまま使われます。初回の実機起動はこれで構いません。
-
-JSON が要るのは `so101_calib` で明示的な YAML を作るとき（Phase 2）だけです。
-その目的は再現性で、サーボを工場出荷リセットしても設定を復元できる、
-2台目の機体に同じ設定を配れる、という利点があります。
-
-JSON が無い場合は **`so101_calib --from-servos`** が EEPROM から
-`Homing offset` / `Min` / `Max` を読んで直接 YAML を起こします（6.2 参照）。
-lerobot の較正キャッシュは実行した PC のホームにしか無いので、
+`so101_calib --from-servos` はサーボから直接読むので、
+**JSON が手元に無くても offset を計算できます。**
+lerobot の較正キャッシュは較正を実行した PC のホームにしか無いので、
 **別の PC で作業する場合はこちらが本筋**です。
 
-ただし、**一度も較正していないサーボはどこかで較正する必要があります**
+```bash
+# JSON から読みたい場合（較正した PC でのみ）
+    --json ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json
+```
+
+ただし、**一度も較正していないサーボはどこかで較正が必要です**
 （lerobot の `lerobot-calibrate` でも、手で書いても構いません）。
-較正されていないと関節角のゼロ点も可動範囲もでたらめになります。
+較正されていないと可動域が `0..4095` のままで、offset を計算する材料がありません。
+`so101_calib` はその状態を検出して警告します。
 
 ## 7. 実機: 起動して静止を確認する
 

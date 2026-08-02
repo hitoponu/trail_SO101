@@ -29,7 +29,6 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     hardware_type = LaunchConfiguration("ros2_control_hardware_type")
     usb_port = LaunchConfiguration("usb_port")
-    joint_config_file = LaunchConfiguration("joint_config_file")
     controllers_file = LaunchConfiguration("controllers_file")
     start_rviz = LaunchConfiguration("start_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
@@ -38,9 +37,11 @@ def generate_launch_description():
     description_share = Path(get_package_share_directory("so_arm101_description"))
 
     xacro_file = description_share / "urdf" / "so_arm101.urdf.xacro"
-    # ★ 上流の ros2_control xacro は使わない (offset が無視される / p_cofficient の
-    #   綴り間違い / joint_config_file が無い の3つのバグがある)。
+    # ★ 上流の ros2_control xacro は使わない。
+    #   上流のものは GitHub main 系の書き方 (offset は非推奨、p_coefficient) だが、
+    #   apt で入る driver は v0.2.2 で意味が違う (offset が必須、p_cofficient)。
     #   親 xacro の ros2_control_file 引数で自前のものへ差し替える。
+    #   詳細は control/so101_follower.ros2_control.xacro の冒頭コメント。
     ros2_control_file = bringup_share / "control" / "so101_follower.ros2_control.xacro"
 
     # ParameterValue(..., value_type=str) は Jazzy では必須。
@@ -51,7 +52,6 @@ def generate_launch_description():
             " ros2_control_hardware_type:=", hardware_type,
             " usb_port:=", usb_port,
             " ros2_control_file:=", str(ros2_control_file),
-            " joint_config_file:=", joint_config_file,
         ]),
         value_type=str,
     )
@@ -89,10 +89,6 @@ def generate_launch_description():
             description="mock_components: 実機に触れないドライラン / real: 実機",
         ),
         DeclareLaunchArgument("usb_port", default_value="/dev/so101_follower"),
-        DeclareLaunchArgument(
-            "joint_config_file",
-            default_value=str(bringup_share / "config" / "so101_joints.yaml"),
-        ),
         DeclareLaunchArgument(
             "controllers_file",
             default_value=str(bringup_share / "config" / "ros2_controllers.yaml"),
