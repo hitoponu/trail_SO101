@@ -28,6 +28,7 @@ def generate_launch_description():
     start_rviz = LaunchConfiguration("start_rviz")
     use_mesh = LaunchConfiguration("use_mesh")
     config_file = LaunchConfiguration("config_file")
+    rviz_config = LaunchConfiguration("rviz_config")
 
     bringup_share = Path(get_package_share_directory("lekiwi_base_bringup"))
     description_share = Path(get_package_share_directory("lekiwi_description"))
@@ -49,6 +50,11 @@ def generate_launch_description():
             "config_file",
             default_value=str(bringup_share / "config" / "base.yaml"),
         ),
+        DeclareLaunchArgument(
+            "rviz_config",
+            default_value=str(bringup_share / "rviz" / "base.rviz"),
+            description="RViz config file (absolute path).",
+        ),
 
         Node(
             package="robot_state_publisher",
@@ -69,11 +75,20 @@ def generate_launch_description():
             ],
         ),
 
+        # sllidar_ros2 は frame_id="laser" で publish する。URDF の laser_link と
+        # 同一位置を指すため、ゼロオフセットの static transform で接続する。
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="laser_frame_bridge",
+            arguments=["--frame-id", "laser_link", "--child-frame-id", "laser"],
+        ),
+
         Node(
             package="rviz2",
             executable="rviz2",
             name="rviz2",
-            arguments=["-d", str(bringup_share / "rviz" / "base.rviz")],
+            arguments=["-d", rviz_config],
             condition=IfCondition(start_rviz),
             output="screen",
         ),

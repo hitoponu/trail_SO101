@@ -29,8 +29,9 @@ services:
       - lekiwi_base_bringup
       - base.launch.py
       - port:=${LEKIWI_DEVICE:-/dev/ttyACM0}
-      # RViz は rplidar 側に任せるためデフォルト false
-      - start_rviz:=${LEKIWI_START_RVIZ:-false}
+      # RViz はこのコンテナで統合表示する (combined.rviz)
+      - start_rviz:=${LEKIWI_START_RVIZ:-true}
+      - rviz_config:=/ros2_ws/install/lekiwi_base_bringup/share/lekiwi_base_bringup/rviz/combined.rviz
       - dry_run:=${DRY_RUN:-false}
     # ★ モータドライバが勝手に復帰してホイールが回り出すのは危険。自動再起動しない。
     restart: "no"
@@ -73,8 +74,8 @@ services:
       - rplidar_bringup
       - a1_points.launch.py
       - serial_port:=${RPLIDAR_DEVICE:-/dev/ttyUSB0}
-      # 両サービス合わせた RViz はこちら側で一括表示
-      - start_rviz:=${RPLIDAR_START_RVIZ:-true}
+      # RViz は lekiwi-base 側の combined.rviz で統合表示するため無効
+      - start_rviz:=false
     restart: unless-stopped
     stdin_open: true
     tty: true
