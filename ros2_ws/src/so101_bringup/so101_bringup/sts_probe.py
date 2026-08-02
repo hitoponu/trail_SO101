@@ -144,6 +144,18 @@ class Probe:
         for motor_id in self.ids:
             self.write(TORQUE_ENABLE, motor_id, 0)
 
+    def enable_torque(self) -> None:
+        """トルクを入れる。
+
+        ★ driver v0.2.2 は **トルクを入れない**（set_torque(true) を一度も呼ばない）。
+          トルクはサーボの電源投入時の状態のまま。したがって
+          `--torque-off` で切ったあと電源を入れ直さずに ros2_control を起動すると、
+          脱力したまま指令だけが送られる状態になる。
+          電源を入れ直す代わりにこれを使える。
+        """
+        for motor_id in self.ids:
+            self.write(TORQUE_ENABLE, motor_id, 1)
+
     def snapshot(self, motor_id: int) -> dict:
         present = self.read(PRESENT_POSITION, motor_id)
         homing_raw = self.read(HOMING_OFFSET, motor_id)
@@ -214,6 +226,12 @@ def main() -> None:
     parser.add_argument(
         "--torque-off", action="store_true", help="トルクを切る (手で動かせるようにする)"
     )
+    parser.add_argument(
+        "--torque-on",
+        action="store_true",
+        help="トルクを入れる。driver v0.2.2 はトルクを入れないので、"
+        "--torque-off の後に電源を入れ直さず ros2_control を起動する場合に必要",
+    )
     parser.add_argument("--watch", action="store_true", help="0.2秒ごとに更新し続ける")
     args = parser.parse_args()
 
@@ -248,6 +266,14 @@ def main() -> None:
             print()
             print("参考: STS3215 の P 既定は 32。lerobot は shakiness 回避で 16 に下げる。")
             print("      MaxTorque の最大は 1000。lerobot は gripper のみ 500 にする。")
+            return
+
+        if args.torque_on:
+            print("トルクを入れます。アームがその場で保持されます。")
+            probe.enable_torque()
+            for motor_id in ids:
+                v = probe.read(TORQUE_ENABLE, motor_id)
+                print(f"  ID {motor_id}: Torque_Enable={v}")
             return
 
         if args.torque_off:
