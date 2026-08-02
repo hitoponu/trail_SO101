@@ -131,12 +131,25 @@ xhost +si:localuser:root
 
 ```bash
 docker compose build
-docker compose up
+docker compose up -d            # ← コンテナが待機するだけ。何も起きない
 ```
 
-**RViz はこの `docker compose up` で一緒に立ち上がります**（別コマンドは不要）。
-`compose.yaml` が launch に `start_rviz:=${START_RVIZ:-true}` を渡しているためです。
-不要なら `.env` の `START_RVIZ=false`、または `START_RVIZ=false docker compose up`。
+**`docker compose up` では ROS ノードも RViz もトルクも起動しません。**
+コンテナは `sleep infinity` で待機するだけです。
+起動の主体は `follower.launch.py` で、明示的に実行します。
+
+```bash
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 launch so101_bringup follower.launch.py
+```
+
+**RViz はこの launch が立ち上げます**（`start_rviz:=false` で抑止できます）。
+
+この形にしている理由:
+
+- **`up` しただけでは実機に触れない。** 実機を動かすのが明示的な操作になる
+- **launch を `Ctrl+C` で止めれば `on_deactivate` が走る**（コンテナは生きたまま）。
+  何度も起動し直すのにコンテナの作り直しが要らない
 
 > **macOS では RViz のウィンドウは出ません**（X サーバが無いため）。
 > ドライラン自体は動くので、下記のコマンドで**数値で確認**してください。

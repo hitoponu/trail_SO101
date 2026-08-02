@@ -26,14 +26,18 @@ services:
       - ${DIALOUT_GID:-20}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    command:
-      - ros2
-      - launch
-      - so101_bringup
-      - follower.launch.py
-      - ros2_control_hardware_type:=${HARDWARE_TYPE:-mock_components}
-      - usb_port:=${SO101_DEVICE:-/dev/null}
-      - start_rviz:=${START_RVIZ:-true}
+    # ★ コンテナは待機するだけ。ROS ノードも RViz もトルクも扱わない。
+    #   起動の主体は follower.launch.py で、明示的に実行する:
+    #
+    #     docker compose exec -it so101-follower /entrypoint.sh \
+    #       ros2 launch so101_bringup follower.launch.py \
+    #         ros2_control_hardware_type:=real usb_port:=/dev/so101_follower
+    #
+    #   こうすることで
+    #     * 実機に触れるのが明示的な操作になる（up しただけでは何も起きない）
+    #     * launch を Ctrl+C で止めれば on_deactivate が走る（コンテナは生きたまま）
+    #     * 何度も起動し直すのにコンテナの作り直しが要らない
+    command: ["sleep", "infinity"]
     # ★ 自動再起動しない。クラッシュ後に勝手にトルクが入り、サーボに残っている
     #   古い Goal_Position へアームが飛ぶのは危険。
     restart: "no"
