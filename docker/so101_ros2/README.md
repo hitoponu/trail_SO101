@@ -277,7 +277,9 @@ wrist_roll      Δ=[  +0.0    -3.8    +1.1] mm   ← 軸まわりの回転なの
 確かめるならモック環境で指令を出し、RViz で見ます（手順4がそのまま使えます）。
 
 ```bash
-docker compose up          # HARDWARE_TYPE=mock_components (既定)
+docker compose up -d
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 launch so101_bringup follower.launch.py       # 既定は mock_components
 ```
 
 別ターミナルから **1関節だけ +0.5 rad** にします。配列の位置を変えれば他の関節になります
@@ -509,10 +511,16 @@ lerobot の較正キャッシュは較正を実行した PC のホームにし�
 **アームの電源を入れ直し、手で支えてから:**
 
 ```bash
-HARDWARE_TYPE=real docker compose up
+docker compose up -d
+
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 launch so101_bringup follower.launch.py \
+    ros2_control_hardware_type:=real usb_port:=/dev/so101_follower
 ```
 
-一瞬脱力してから保持に入ります。
+`torque` 引数（既定 `true`）が `ros2_control` より**前に**トルクを入れます。
+driver v0.2.2 は自分では入れないためです。
+手で動かしながら確認したい場合は `torque:=false`。
 
 ```bash
 docker compose exec so101-follower /entrypoint.sh ros2 control list_hardware_components
@@ -808,7 +816,7 @@ echo "$DISPLAY"; ls -l /tmp/.X11-unix; xhost
 ```
 
 `xhost +si:localuser:root` をデスクトップにログインしているユーザーの端末から
-再実行してください。設定変更後は `docker compose down && docker compose up --force-recreate`。
+再実行してください。設定変更後は `docker compose down && docker compose up -d --force-recreate`。
 
 ## 既知の問題（上流）
 
@@ -831,7 +839,7 @@ read タイムアウトは 5ms で、タイムアウト時のリトライがあ�
 
 **このときトルクは切れません。** STS3215 にコマンドウォッチドッグは無いので、
 サーボは最後の指令位置を保持し続けます。アームは落ちませんが固まります。
-復帰には `docker compose down && docker compose up` が必要です。
+復帰には launch の再起動が必要です（`Ctrl+C` してから launch し直す）。
 
 ModemManager 対策と USB 接続の品質が効くのはこのためです。
 
