@@ -16,6 +16,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-xacro \
     && rm -rf /var/lib/apt/lists/*
 
+# ナビゲーション。実機なしの検証 (fake_scan + dry_run) でも実機でも同じものを使う。
+# ★ 実機を動かすだけなら不要な追加。イメージが約 500MB 増えるが、
+#   ドライバと Nav2 でイメージを分けると TF/トピックの疎通を
+#   コンテナ跨ぎで検証することになり、切り分けが難しくなるため同居させる。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-jazzy-navigation2 \
+      ros-jazzy-nav2-bringup \
+      ros-jazzy-slam-toolbox \
+      ros-jazzy-twist-mux \
+    && rm -rf /var/lib/apt/lists/*
+
 # Ubuntu 24.04 は PEP 668 で system python を保護しているため、素の pip install は
 # externally-managed-environment で失敗する。このイメージは使い捨ての単一用途で、
 # feetech-servo-sdk には競合する dpkg パッケージも存在しないため上書きする。

@@ -4,7 +4,7 @@ Visualization Manager:
   Class: ""
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: laser
+    Fixed Frame: laser_link
     Frame Rate: 30
   Displays:
     - Class: rviz_default_plugins/Grid

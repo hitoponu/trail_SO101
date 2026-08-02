@@ -1,0 +1,82 @@
+# slam_toolbox (async / mapping モード) の設定。
+#
+# 役割は Nav2 が要求する **map → odom の TF** と /map を出すこと。
+# base_driver のオドメトリはオープンループ (指令値の積分) でスリップも外乱も
+# 検出しないため、自己位置の責任は実質すべてここにある。
+#
+# 値は slam_toolbox 同梱の mapper_params_online_async.yaml を土台に、
+# この機体 (最大 0.26 m/s、外接半径 約 0.15 m、想定は屋内の小部屋) に合わせて
+# 調整してある。変更した箇所には ★ を付けた。
+
+slam_toolbox:
+  ros__parameters:
+    # ── ソルバ ──────────────────────────────────────────────────────
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ── フレームとトピック ──────────────────────────────────────────
+    odom_frame: odom
+    map_frame: map
+    # ★ base_driver の child_frame_id と揃える (base.yaml の base_frame)。
+    #   ここがずれると TF ツリーが二股に分かれて Nav2 が自己位置を失う。
+    base_frame: base_footprint
+    scan_topic: /scan
+    mode: mapping
+
+    debug_logging: false
+    throttle_scans: 1
+    # ★ 50Hz。base_driver の制御周期と揃えて、Nav2 が古い TF を引かないようにする。
+    transform_publish_period: 0.02
+    map_update_interval: 2.0
+    # ★ Nav2 の costmap resolution と揃える。ずれていても動くが、
+    #   地図と costmap のグリッドがずれて境界がぼやける。
+    resolution: 0.05
+    # ★ RPLIDAR A1M8 の最大測距。fake_scan の range_max と揃えてある。
+    max_laser_range: 12.0
+    minimum_time_interval: 0.2
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+    enable_interactive_mode: true
+
+    # ── スキャンマッチング ──────────────────────────────────────────
+    use_scan_matching: true
+    use_scan_barycenter: true
+    # ★ 既定 0.5 / 0.5 から下げた。機体が小さく低速で、部屋も 5x4m しかないため、
+    #   0.5m 進むまでスキャンを取り込まないと地図がスカスカになる。
+    minimum_travel_distance: 0.1
+    minimum_travel_heading: 0.1
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 12.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # ── 相関 ────────────────────────────────────────────────────────
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # ── ループ閉じ込みの相関 ────────────────────────────────────────
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ── スキャンマッチャ ────────────────────────────────────────────
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
