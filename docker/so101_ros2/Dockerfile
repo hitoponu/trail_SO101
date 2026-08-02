@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-colcon-common-extensions \
       python3-numpy \
       python3-pip \
+      python3-pynput \
       python3-vcstool \
       python3-yaml \
       ros-jazzy-feetech-ros2-driver \
@@ -94,6 +95,7 @@ RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
     && ! grep -q 'name="offset"' /tmp/real.urdf \
     && python3 -c "import scservo_sdk, yaml" \
     && python3 -c "from so101_bringup import lerobot_calib, sts_probe" \
+    && python3 -c "from so101_bringup import cartesian_jog, cartesian_math, keyboard_input" \
     && python3 -c "import yaml,sys; d=yaml.safe_load(open('$B/config/so101_joints.yaml')); \
                    ids=sorted(v['id'] for v in d['joints'].values()); \
                    sys.exit(0 if ids==[1,2,3,4,5,6] else 1)"
