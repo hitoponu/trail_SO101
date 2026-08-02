@@ -1,40 +1,37 @@
-# 開発用のオーバーレイ。設定を編集して即試すためのもの。
+# 開発用のオーバーレイ。**ワークスペース全体をホストからマウントする。**
 #
+#   # 初回だけ（上流の取得とビルド）
+#   docker compose -f compose.yaml -f compose.dev.yaml run --rm so101-follower \
+#     bash /bootstrap.sh
+#
+#   # 以降
 #   docker compose -f compose.yaml -f compose.dev.yaml up
 #
-# ■ なぜこれで再ビルドが要らなくなるのか
+# ■ 考え方
+# リポジトリが正で、コンテナは実行環境（ROS + apt 依存）だけを提供する。
+# ソースもビルド成果物も**ホスト側に残る**ので、
 #
-# イメージは `colcon build --symlink-install` でビルドしてあり、
-# install 空間のファイルは実体ではなく symlink になっている。
-# 連鎖をたどると:
+#   * 設定やコードを編集 → コンテナを再起動するだけで反映
+#   * ファイルを追加したら、コンテナ内で colcon build → 再起動
+#   * その結果は docker compose down しても消えない
 #
-#   install/so101_bringup/share/.../so101_offsets.xacro
-#     -> build/so101_bringup/config/so101_offsets.xacro
-#       -> src/so101_bringup/config/so101_offsets.xacro
+# ■ compose.yaml 単体（このファイルを使わない）との違い
+# 素の compose.yaml はイメージに焼かれたソースと install 空間を使う。
+# 自己完結していて `docker compose up` だけで動くが、
+# 変更のたびに `docker compose build` が要る。
+# **実機の調整中はこちら（dev）、動作確認や配布は素の compose.yaml、
+# と使い分けるのが良い。**
 #
-# つまり最終的に `/ros2_ws/src/so101_bringup` を読んでいる。
-# そこをホスト側のソースで上書きマウントすれば、
-# **編集 → コンテナ再起動だけで反映される**（docker compose build は不要）。
-#
-# ■ これで反映されるもの
-#   config/*.xacro  … offset、PID ゲイン
-#   control/*.xacro … ros2_control の記述
-#   launch/*.py     … launch ファイル
-#   so101_bringup/*.py … so101_probe / so101_calib などの Python
-#
-# ■ これでは反映されないもの（docker compose build が要る）
-#   * ファイルの新規追加（colcon が symlink を張り直す必要がある）
-#   * setup.py / package.xml の変更（entry_points や依存の再生成が要る）
-#   * Dockerfile の変更、apt パッケージの追加
-#
-# ■ 本番では使わないこと
-# ホストのソースがイメージの中身を隠すので、
-# 「ビルドしたものがそのまま動く」という再現性が失われる。
-# 値が決まったら必ず commit し、`docker compose build` で焼き込むこと。
+# ■ 注意
+# ホストの ros2_ws/{build,install,log} は .gitignore 済み。
+# アーキテクチャに依存するので、Mac で作ったものを Linux へ持って行っても動かない。
+# 各マシンで一度 bootstrap すること。
 
 services:
   so101-follower:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      # 読み取り専用。コンテナからホストのソースを書き換えさせない。
-      - ../../ros2_ws/src/so101_bringup:/ros2_ws/src/so101_bringup:ro
+      # ワークスペース全体。src だけでなく build/install もホストに置くことで、
+      # コンテナを作り直しても colcon build の結果が消えない。
+      - ../../ros2_ws:/ros2_ws
+      - ./bootstrap.sh:/bootstrap.sh:ro
