@@ -15,7 +15,7 @@
 #   (sts_bus.py のリトライが症状を隠してしまう)。
 #   RPLIDAR の CP210x では起きにくいが CDC-ACM では頻発するため必須。
 
-SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", \
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", \
   MODE:="0660", GROUP:="dialout", SYMLINK+="lekiwi", \
   ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
 

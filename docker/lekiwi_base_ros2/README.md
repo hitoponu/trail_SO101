@@ -1,5 +1,8 @@
 # LeKiwi ベース + ROS 2 Jazzy + Docker
 
+> **LeKiwi ベース + RPLiDAR を同時に起動する場合は [`../lekiwi_bringup/`](../lekiwi_bringup/) を使ってください。**
+> このディレクトリはベース単体の動作確認・デバッグ用です。
+
 LeKiwi の3輪オムニ移動ベース（Feetech STS3215 × 3、モータ ID 7/8/9）を
 ROS 2 の `/cmd_vel` で駆動する構成です。オドメトリと TF を出すので、
 RPLIDAR や RealSense と同じ TF ツリー上に載せられます。
@@ -72,6 +75,11 @@ ls -l /dev/lekiwi
 
 ```bash
 sudo usermod -aG dialout "$USER"
+```
+
+一時的に反映する場合（現在のシェルのみ）
+```bash
+newgrp dialout
 ```
 
 ## 2. 環境ファイルを作る
@@ -207,13 +215,13 @@ wheel_direction_signs: [-1.0, 1.0, 1.0]   # 左輪が逆だった場合
 
 D1が通ってから実施します。
 
-```bash
+```
 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.1}}'
 ```
 
 **後輪（ID 8）の反対側**へ進むのが正しい向きです。
 
-| 症状 | `wheel_angle_offset_deg` |
+| 症状 | `wheel_angle_offsebasht_deg` |
 | --- | --- |
 | 正しい | `-90.0`（既定） |
 | 90°ずれる | `0.0` または `-180.0` |
