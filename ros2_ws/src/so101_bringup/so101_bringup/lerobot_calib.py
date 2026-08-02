@@ -108,6 +108,21 @@ DEFAULT_TUNING = {
 GRIPPER_EXTRA = {"protection_current": 200, "overload_torque": 40}
 
 
+def wrap_homing(value: int) -> int:
+    """homing_offset をレジスタが表現できる範囲へ折り返す。
+
+    サーボは ``Present = (Actual - Homing_Offset) mod 4096`` で位置を計算するため、
+    4096 だけずらした homing_offset は**完全に等価**である。
+    ゼロがエンコーダの折り返し点付近にある関節では、素朴に Δ を足すと
+    ±2047 のレジスタ範囲を超えるが、折り返せば表現できる。
+
+    (この mod 演算はファームの実測挙動から確認済み: homing=2012 / 記録範囲
+     1014..3350 の関節で、Actual が 4096 をまたぐのに Present が連続かつ
+     range_max=3350 になるのは mod 4096 でラップしているときだけ。)
+    """
+    return ((value + 2048) % 4096) - 2048
+
+
 def deltas_from_ranges(calib: dict, gripper_closed: str) -> tuple[dict[str, int], list[str]]:
     """記録済みの可動域から Δ を計算する（目測不要）。
 
@@ -219,9 +234,12 @@ def parse_deltas(text: str) -> dict[str, int]:
     return out
 
 
-def convert(calib: dict, deltas: dict[str, int], emit_ranges: bool) -> tuple[dict, list[str]]:
+def convert(
+    calib: dict, deltas: dict[str, int], emit_ranges: bool
+) -> tuple[dict, list[str], list[str]]:
     joints: dict[str, dict] = {}
     errors: list[str] = []
+    notes: list[str] = []
 
     for name, ros_name in LEROBOT_TO_ROS.items():
         if name not in calib:
@@ -231,22 +249,21 @@ def convert(calib: dict, deltas: dict[str, int], emit_ranges: bool) -> tuple[dic
         entry = calib[name]
         delta = deltas.get(name, 0)
 
-        homing = int(entry["homing_offset"]) + delta
+        raw_homing = int(entry["homing_offset"]) + delta
+        homing = wrap_homing(raw_homing)
+        if homing != raw_homing:
+            # ゼロがエンコーダの折り返し点付近にある関節で起きる。
+            # サーボは Present = (Actual - homing) mod 4096 で計算するので、
+            # 4096 ずらした値は完全に等価。レジスタに収まる表現を選ぶだけ。
+            notes.append(
+                f"{name}: homing_offset {raw_homing} はレジスタ範囲外なので"
+                f" {homing} に折り返した (mod 4096 で等価)。"
+                " この関節はゼロがエンコーダの折り返し点付近にある"
+            )
         if abs(homing) > MAX_HOMING_OFFSET:
-            # この関節はゼロがエンコーダの折り返し点付近にあり、現在の homing_offset は
-            # 「またいでも Present が連続になる」よう選ばれている。Δ を足すと
-            # レジスタの表現範囲を超える。等価な (homing - 4096) はレジスタには
-            # 収まるが、今度は Present 側が折り返しをまたぐため安全ではない。
-            over = abs(homing) - MAX_HOMING_OFFSET
             errors.append(
-                f"{name}: homing_offset={homing} が ±{MAX_HOMING_OFFSET} を"
-                f"{over} tick 超える (driver が on_init でクラッシュするので却下)。\n"
-                f"    原因: この関節はゼロがエンコーダの折り返し点付近にあり、\n"
-                f"          現在の homing_offset={int(entry['homing_offset'])} はそれを吸収している。\n"
-                f"    対処 A: --delta {name}=0 で補正を諦める"
-                f" (この関節が {delta * 360 / 4096:+.1f}° ずれたままになる)\n"
-                f"    対処 B: この関節を URDF ゼロ姿勢付近に置いて lerobot の較正をやり直す\n"
-                f"            (homing_offset が中央寄りになり、この問題が消える)"
+                f"{name}: homing_offset={homing} が ±{MAX_HOMING_OFFSET} を超える。"
+                " driver が on_init でクラッシュするので却下する"
             )
 
         out: dict = {"id": int(entry["id"])}
@@ -274,7 +291,7 @@ def convert(calib: dict, deltas: dict[str, int], emit_ranges: bool) -> tuple[dic
 
         joints[name] = out
 
-    return joints, errors
+    return joints, errors, notes
 
 
 def dump_yaml(joints: dict, source: Path, deltas: dict[str, int]) -> str:
@@ -373,7 +390,9 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    joints, errors = convert(calib, deltas, args.emit_ranges)
+    joints, errors, notes = convert(calib, deltas, args.emit_ranges)
+    for note in notes:
+        print(f"# 注意: {note}", file=sys.stderr)
     if errors:
         for message in errors:
             print(f"エラー: {message}", file=sys.stderr)
