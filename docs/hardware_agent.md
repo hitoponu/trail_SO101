@@ -162,6 +162,10 @@ git push
 - **検証済み (2026-08-02)**: wrist_flex を手で両可動端まで動かした結果、
   `Present=1019..3362`、`q_ros=-1.5785..2.0157 rad` で、途中に不連続な飛びはなく、
   `4 rad` を超える値も観測しなかった
+- **未解決 (2026-08-02)**: 全関節を limit 内にして実機起動しても、ドライバが
+  `offset` 未指定を 0 として扱い、`/joint_states` は `Present * 2π/4096` 相当の値を配信した。
+  scan の `q_ros` より全関節で約 `π rad` ずれ、shoulder_pan と gripper の limit 超過で
+  trajectory / gripper controller が停止した。RViz も実物と一致しなかった
 - **未検証**: グリッパの「閉」が `range_min`(1961) 側か `range_max`(3399) 側か
 - **検証済み**: モック環境でのコントローラ4種、`FollowJointTrajectory`、
   `ParallelGripperCommand`、TF、`enforce_command_limits`
