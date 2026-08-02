@@ -404,21 +404,65 @@ gripper        Δ =  -790 tick ( -69.4°)
 
 ### 6.5 設定ファイルへ反映する
 
-6.2 のコマンドの標準出力を
-`ros2_ws/src/so101_bringup/config/so101_joints.yaml` へ書き出し、
-`docker compose build` し直します（`-o` で直接書き出すこともできます）。
+`so101_calib` は **YAML を標準出力へ吐く**だけなので、リダイレクトでファイルにします。
+診断メッセージは標準エラーへ出るので、ファイルには混ざりません。
+
+このディレクトリ（`docker/so101_ros2`）から実行する場合:
+
+```bash
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_calib \
+    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
+  > ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml
+
+docker compose build
+```
+
+**いきなり上書きせず、一度確認してからにするほうが安全です。**
+
+```bash
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_calib \
+    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
+  > /tmp/so101_joints.yaml
+
+diff -u ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml /tmp/so101_joints.yaml
+cp /tmp/so101_joints.yaml ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml
+docker compose build
+```
+
+> `-o` オプションは**コンテナ内**のパスに書くのでホストからは見えません。
+> ホストのファイルにしたい場合は上記のリダイレクトを使ってください。
+
+出来上がるのはこういうファイルです（先頭のコメントに Δ の内訳が残ります）。
+
+```yaml
+# so101_calib が生成したファイル (Phase 2: ゼロ点を実測して明示的に書いた状態)。
+#   実測 Δ: {'shoulder_pan': 62, 'shoulder_lift': -11, 'elbow_flex': -120, ...}
+joints:
+  shoulder_pan:
+    id: 1
+    p_coefficient: 16
+    ...
+    homing_offset: 530
+    range_min: 812
+    range_max: 3533
+```
 
 Δ を手で与えたい／6.4 で補正した分を足したい場合は `--delta` を併用します。
 `--from-ranges` の結果を関節ごとに上書きできます。
 
 ```bash
-    --json /calib.json --from-ranges --emit-ranges \
+    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
     --delta wrist_roll=-25,elbow_flex=-140
 ```
 
 生成されたファイルは `homing_offset` が `±2047` を超えないこと、
 `range_*` が `0..4095` に収まることを自動で検査します（超えると却下されます。
 ドライバが `on_init` でクラッシュするためです）。
+
+`docker compose build` を忘れると設定が反映されません
+（イメージ内の `install/` にコピーされるため）。
 
 ### 6.6 lerobot の較正 JSON は必須ではない
 
