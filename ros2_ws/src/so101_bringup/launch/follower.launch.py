@@ -19,10 +19,14 @@ driver v0.2.2 は **トルクを入れない**（`set_torque(true)` を一度も
 `so101_probe --torque-off` の後に起動すると脱力したまま指令だけが送られる
 （「動かない」ように見える）。
 
-そこでこの launch は `ros2_control` を起動する**前に**トルクを入れる。
+そこでこの launch は `ros2_control` を起動する**前に**トルクを操作する。
 同じシリアルポートを二重に開かないよう、前処理の終了を待ってから制御を上げる。
 
-手で動かしながら TF を見たい場合などは `torque:=false`。
+    torque:=true  （既定）… トルクを**入れる**
+    torque:=false        … トルクを**切る**（手で動かしながら TF を見たいとき）
+
+★ `torque:=false` は「入れない」ではなく「切る」。driver はトルクを触らないので、
+  「入れないだけ」にすると電源投入時の状態（通常 ON）が残り、固いままになる。
 
     ros2 launch so101_bringup follower.launch.py \\
         ros2_control_hardware_type:=real torque:=false
@@ -63,10 +67,15 @@ def generate_launch_description():
     #   詳細は control/so101_follower.ros2_control.xacro の冒頭コメント。
     ros2_control_file = bringup_share / "control" / "so101_follower.ros2_control.xacro"
 
-    # 実機かつ torque:=true のときだけトルクを入れる。
-    # mock ではシリアルを開かないので前処理は不要。
-    needs_torque = PythonExpression([
-        "'", torque, "' == 'true' and '", hardware_type, "' == 'real'",
+    # 実機のときだけトルクを操作する。mock ではシリアルを開かないので不要。
+    #
+    # ★ torque:=false は「入れない」ではなく **「切る」**。
+    #   driver v0.2.2 はトルクを一切触らない (on_deactivate で切るだけ) ので、
+    #   「入れないだけ」にすると電源投入時の状態 (通常 ON) がそのまま残り、
+    #   torque:=false にしてもアームは固いままになる。
+    is_real = PythonExpression(["'", hardware_type, "' == 'real'"])
+    torque_flag = PythonExpression([
+        "'--torque-on' if '", torque, "' == 'true' else '--torque-off'",
     ])
 
     # ParameterValue(..., value_type=str) は Jazzy では必須。
@@ -120,10 +129,10 @@ def generate_launch_description():
     #   自動で付き、argparse が
     #     error: unrecognized arguments: --ros-args -r __node:=so101_torque_on
     #   で終了する。トルクが入らないまま制御だけ上がってしまう。
-    torque_on = ExecuteProcess(
+    torque_step = ExecuteProcess(
         cmd=["ros2", "run", "so101_bringup", "so101_probe",
-             "--port", usb_port, "--torque-on"],
-        condition=IfCondition(needs_torque),
+             "--port", usb_port, torque_flag],
+        condition=IfCondition(is_real),
         output="screen",
     )
 
@@ -158,14 +167,14 @@ def generate_launch_description():
             parameters=[{"robot_description": robot_description}],
         ),
 
-        # トルクを入れる場合: 前処理の終了を待って ros2_control を起動する
-        torque_on,
+        # 実機: トルク操作の終了を待ってから ros2_control を起動する
+        torque_step,
         RegisterEventHandler(
-            OnProcessExit(target_action=torque_on, on_exit=[make_control_node()]),
-            condition=IfCondition(needs_torque),
+            OnProcessExit(target_action=torque_step, on_exit=[make_control_node()]),
+            condition=IfCondition(is_real),
         ),
-        # 入れない場合（mock、または torque:=false）: すぐ起動する
-        make_control_node(condition=UnlessCondition(needs_torque)),
+        # mock: 前処理が無いのですぐ起動する
+        make_control_node(condition=UnlessCondition(is_real)),
 
         jsb,
         RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[jtc])),
