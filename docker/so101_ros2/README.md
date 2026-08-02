@@ -45,9 +45,20 @@
 | --- | --- | --- | --- |
 | 今の動作だけ止めたい | 実行中の `send_goal` を `Ctrl+C`（goal cancel） | ON | その場で保持。**最速のソフト停止** |
 | 制御を切り離したい | `ros2 control switch_controllers --deactivate joint_trajectory_controller` | ON | 最後の指令位置で保持 |
+| 動きを凍結したい | **`docker compose down`** | ON | **凍結**（下記参照） |
 | 動きを凍結したい | `docker kill -s SIGKILL so101-follower` | ON | 凍結（発熱注意） |
-| 通常終了 | `Ctrl+C` / `docker compose down` | **OFF** | **脱力して落ちる** |
+| 脱力させたい | **launch を `Ctrl+C`** | **OFF** | **脱力して落ちる** |
 | 完全停止 | アーム電源スイッチ OFF | **OFF** | **脱力して落ちる**。唯一の物理的非常停止 |
+
+> **★ `docker compose down` ではアームは落ちません（凍結します）。**
+> launch は `docker compose exec` で動いており **PID 1 の子ではない**ため、
+> コンテナ停止時に SIGINT が届きません（実測で確認）。
+> `on_deactivate` が走らないのでトルクが入ったままになります。
+>
+> **脱力させたいときは launch を動かしている端末で `Ctrl+C`** してください。
+> こちらは SIGINT が届き、`on_deactivate` がトルクを切ります（＝落ちます）。
+>
+> 停止前に低く畳んだ姿勢へ動かすべきなのは `Ctrl+C` の場合です。
 
 ## 前提
 
