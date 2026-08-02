@@ -1,0 +1,61 @@
+# 実機なしで LeKiwi ベースを検証するための compose。
+#
+#   docker compose -f compose.dryrun.yaml build
+#   docker compose -f compose.dryrun.yaml up
+#
+# ■ なぜ別ファイルなのか
+# 本番の compose.yaml は `devices:` でシリアルデバイスを無条件にマップするため、
+# /dev/ttyACM0 が存在しないホストでは DRY_RUN=true でも起動できない。
+#
+#   Error response from daemon: error gathering device information
+#   while adding custom device "/dev/ttyACM0": no such file or directory
+#
+# これはコンテナ生成前に daemon が出すエラーなので、環境変数では回避できない。
+# Compose のリストマージは「追記」であって「除去」ができず、override では
+# devices を消せないため、独立したファイルとして分けている。
+#
+# ■ 本番との差分はこの3点だけ
+#   1. devices / group_add を持たない (シリアルを一切要求しない)
+#   2. dry_run を true に固定 (環境変数で上書きできない = 構造的に安全)
+#   3. container_name を分けた (本番と同時に起動してもぶつからない)
+#
+# build 定義は本番と同一イメージを指すので、検証しているのは「本番と同じ成果物」。
+
+services:
+  lekiwi-base-dryrun:
+    build:
+      context: ../..
+      dockerfile: docker/lekiwi_base_ros2/Dockerfile
+    image: local/lekiwi-base-ros2:jazzy
+    container_name: lekiwi-base-dryrun
+    # tini を PID 1 に置く。シグナルを子プロセスへ転送し、ゾンビを回収する。
+    init: true
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+    # ★ devices: と group_add: は意図的に持たない。足すとこのファイルの存在意義が消える。
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command:
+      - ros2
+      - launch
+      - lekiwi_base_bringup
+      - base.launch.py
+      # ★ dry_run はここで固定する。${DRY_RUN:-...} にしないこと。
+      #   シリアルデバイスを渡していないので、false にすると起動失敗するだけ。
+      - dry_run:=true
+      - start_rviz:=${START_RVIZ:-true}
+    # 本番と同じ停止経路を通しておく。dry_run にモータは無いが、
+    # SIGINT で safe_stop() まで到達することをここで確認できる。
+    restart: "no"
+    stop_signal: SIGINT
+    stop_grace_period: 20s
+    stdin_open: true
+    tty: true

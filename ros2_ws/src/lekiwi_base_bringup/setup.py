@@ -17,6 +17,9 @@ setup(
         (os.path.join("share", package_name, "rviz"), glob("rviz/*.rviz")),
     ],
     install_requires=["setuptools"],
+    # これが無いと colcon が setuptools の test コマンドへ落ちて
+    # 「NO TESTS RAN」になる (pytest を使うことの宣言でもある)。
+    tests_require=["pytest"],
     zip_safe=True,
     maintainer="maintainer",
     maintainer_email="maintainer@example.com",
@@ -26,6 +29,7 @@ setup(
         "console_scripts": [
             "base_driver = lekiwi_base_bringup.base_driver:main",
             "sts_bus = lekiwi_base_bringup.sts_bus:main",
+            "fake_scan = lekiwi_base_bringup.fake_scan:main",
         ],
     },
 )
