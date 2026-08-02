@@ -36,7 +36,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
 from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import Command, LaunchConfiguration, PythonExpression
@@ -113,11 +113,16 @@ def generate_launch_description():
 
     # ★ ros2_control より **先に** 実行し、終了を待ってから制御を上げる。
     #   同じシリアルポートを二重に開かないため。
-    torque_on = Node(
-        package="so101_bringup",
-        executable="so101_probe",
-        name="so101_torque_on",
-        arguments=["--port", usb_port, "--torque-on"],
+    #
+    # ★★ Node ではなく ExecuteProcess を使うこと。★★
+    #   so101_probe は ROS ノードではなく素の argparse スクリプトなので、
+    #   launch_ros.actions.Node を使うと `--ros-args -r __node:=...` が
+    #   自動で付き、argparse が
+    #     error: unrecognized arguments: --ros-args -r __node:=so101_torque_on
+    #   で終了する。トルクが入らないまま制御だけ上がってしまう。
+    torque_on = ExecuteProcess(
+        cmd=["ros2", "run", "so101_bringup", "so101_probe",
+             "--port", usb_port, "--torque-on"],
         condition=IfCondition(needs_torque),
         output="screen",
     )
