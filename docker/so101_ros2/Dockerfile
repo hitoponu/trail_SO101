@@ -112,9 +112,9 @@ RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
                    o=[int(m) for m in re.findall(r'<param name=\"offset\">(-?[0-9]+)</param>', t)]; \
                    sys.exit(0 if len(o)==6 and all(0<=v<=4095 for v in o) else 1)" \
     && python3 -c "from so101_bringup import cartesian_jog, cartesian_math, keyboard_input" \
-    && python3 -c "import yaml,sys; d=yaml.safe_load(open('$B/config/so101_joints.yaml')); \
-                   ids=sorted(v['id'] for v in d['joints'].values()); \
-                   sys.exit(0 if ids==[1,2,3,4,5,6] else 1)"
+    && python3 -c "import yaml,sys; d=yaml.safe_load(open('$B/config/ros2_controllers.yaml')); \
+                   j=d['joint_trajectory_controller']['ros__parameters']['joints']; \
+                   sys.exit(0 if len(j)==5 and 'gripper_joint' not in j else 1)"
 
 COPY docker/so101_ros2/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
