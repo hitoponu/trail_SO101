@@ -21,11 +21,11 @@
     shoulder_lift    802..3154     1978       −70
     elbow_flex       670..3051     1916      −132
     wrist_flex      1014..3350     2182      +134
-    wrist_roll         0..4095     2048        +0    ★暫定
+    wrist_roll         0..4095     2116       +68    実機で実測
     gripper         1961..3399     1961       −87    ★要確認
 
   ★ wrist_roll: lerobot がフルターン扱いで可動域を記録しないため計算できない。
-    2048（無補正）を暫定で置いている。RViz と実物を見比べて手で詰めること。
+    2026‑08‑02 に実機で実測して 2116 に確定した（暫定値 2048 から +68）。
   ★ gripper: 「閉」が range_min(1961) 側であることを未確認。
     閉じ切って so101_probe の Present を読み、range_max(3399) 側だったら
     そちらへ差し替えること。
@@ -38,6 +38,6 @@
   <xacro:property name="so101_offset_shoulder_lift" value="1978"/>
   <xacro:property name="so101_offset_elbow_flex"    value="1916"/>
   <xacro:property name="so101_offset_wrist_flex"    value="2182"/>
-  <xacro:property name="so101_offset_wrist_roll"    value="2048"/>
+  <xacro:property name="so101_offset_wrist_roll"    value="2116"/>
   <xacro:property name="so101_offset_gripper"       value="1961"/>
 </robot>
