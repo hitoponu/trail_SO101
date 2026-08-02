@@ -61,6 +61,28 @@ MAX_HOMING_OFFSET = 2047
 
 MAX_TICK = 4095
 
+#: driver が位置の基準にする tick (lerobot は 2047)。
+STS_MIDPOINT = 2048
+
+#: so_arm101_description の URDF 関節 limit [rad]。
+#: ★ URDF (so_arm101_macro.xacro) と一致していること。--from-ranges の計算に使う。
+URDF_LIMITS = {
+    "shoulder_pan": (-1.91986, 1.91986),
+    "shoulder_lift": (-1.74533, 1.74533),
+    "elbow_flex": (-1.69, 1.54),
+    "wrist_flex": (-1.6, 1.6),
+    "wrist_roll": (-2.3, 2.3),
+    "gripper": (0.0, 1.70),
+}
+
+#: lerobot がフルターン扱いにして可動域を記録しない関節。
+#: range が 0..4095 固定なので --from-ranges では Δ を計算できない。
+FULL_TURN_MOTORS = {"wrist_roll"}
+
+#: グリッパは URDF のゼロが「閉」= 可動端であって中間ではない。
+#: 他の関節とは計算方法が違う。
+GRIPPER = "gripper"
+
 #: 既定の調整値。so101_joints.yaml の Phase 1 と揃えてある。
 DEFAULT_TUNING = {
     "p_coefficient": 16,
@@ -70,6 +92,58 @@ DEFAULT_TUNING = {
     "acceleration": 20,
 }
 GRIPPER_EXTRA = {"protection_current": 200, "overload_torque": 40}
+
+
+def deltas_from_ranges(calib: dict, gripper_closed: str) -> tuple[dict[str, int], list[str]]:
+    """記録済みの可動域から Δ を計算する（目測不要）。
+
+    SO-101 の new_calib の規約は「各関節の仮想ゼロ＝可動域の中間」なので、
+    lerobot が ``record_ranges_of_motion`` で記録した機械的可動端から
+    ゼロ位置を逆算できる。可動端は客観的で再現性があるため、
+    姿勢を目測で作るより確実。
+
+    URDF の limit が非対称な関節（elbow_flex）に対応するため、単純な中点では
+    なく「limit 内でのゼロの位置比率」で内挿する::
+
+        frac = (0 - lower) / (upper - lower)
+        zero_tick = range_min + frac * (range_max - range_min)
+
+    グリッパだけは URDF のゼロが「閉」= 可動端なので別扱い。
+
+    ★ 前提: 較正時に**機械的な可動端まで振り切れている**こと。
+      途中で止めていると中点がずれる。再スイープして range が再現するかで
+      検証できる。
+    """
+    out: dict[str, int] = {}
+    notes: list[str] = []
+
+    for name, (lower, upper) in URDF_LIMITS.items():
+        if name not in calib:
+            continue
+        entry = calib[name]
+        rmin, rmax = int(entry["range_min"]), int(entry["range_max"])
+
+        if name in FULL_TURN_MOTORS:
+            notes.append(
+                f"{name}: lerobot がフルターン扱いで可動域を記録していないため"
+                " Δ を計算できない (Δ=0 のまま)。必要なら --delta で個別に与えること"
+            )
+            continue
+
+        if name == GRIPPER:
+            # URDF のゼロは「閉」。どちらの可動端が閉かは機体を見て決める。
+            zero_tick = rmin if gripper_closed == "min" else rmax
+            notes.append(
+                f"{name}: 閉を range_{gripper_closed}({zero_tick}) と仮定した。"
+                " 閉じながら so101_probe で Present を見て確認すること"
+            )
+        else:
+            frac = (0.0 - lower) / (upper - lower)
+            zero_tick = rmin + frac * (rmax - rmin)
+
+        out[name] = int(round(zero_tick - STS_MIDPOINT))
+
+    return out, notes
 
 
 def parse_deltas(text: str) -> dict[str, int]:
@@ -163,9 +237,21 @@ def main() -> None:
     )
     parser.add_argument("--json", required=True, type=Path, help="lerobot の較正 JSON")
     parser.add_argument(
+        "--from-ranges",
+        action="store_true",
+        help="記録済みの可動域からΔを計算する（目測不要。推奨）",
+    )
+    parser.add_argument(
+        "--gripper-closed",
+        choices=("min", "max"),
+        default="min",
+        help="--from-ranges のとき、グリッパの「閉」がどちらの可動端か（既定: min）",
+    )
+    parser.add_argument(
         "--delta",
         default="",
-        help="so101_probe で実測した Δ。例: shoulder_pan=0,gripper=-790",
+        help="Δ を手で与える。--from-ranges と併用すると個別に上書きできる。"
+        " 例: shoulder_pan=0,gripper=-790",
     )
     parser.add_argument(
         "--emit-ranges",
@@ -176,7 +262,18 @@ def main() -> None:
     args = parser.parse_args()
 
     calib = json.loads(args.json.read_text())
-    deltas = parse_deltas(args.delta)
+
+    deltas: dict[str, int] = {}
+    if args.from_ranges:
+        deltas, notes = deltas_from_ranges(calib, args.gripper_closed)
+        print("# --from-ranges: 可動域からΔを計算した (目測なし)", file=sys.stderr)
+        for name, value in deltas.items():
+            print(f"#   {name:<14} Δ = {value:+5d} tick ({value * 360 / 4096:+6.1f}°)", file=sys.stderr)
+        for note in notes:
+            print(f"# 注意: {note}", file=sys.stderr)
+
+    # --delta は --from-ranges の結果を個別に上書きする
+    deltas.update(parse_deltas(args.delta))
 
     missing = [n for n in LEROBOT_TO_ROS if n not in deltas]
     if missing:
