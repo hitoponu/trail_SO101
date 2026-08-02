@@ -131,11 +131,19 @@ docker compose up
 
 別ターミナルで確認します。
 
+> **`docker compose exec` には `/entrypoint.sh` を前置します。**
+> `exec` は ENTRYPOINT を通らないため、そのままでは `setup.bash` が source されず
+> `ros2: executable file not found in $PATH` になります。
+> `docker compose run` や `up` は ENTRYPOINT を通るので前置は不要です。
+>
+> 対話的に触りたい場合は `docker compose exec -it so101-follower bash` で入れば、
+> `/etc/bash.bashrc` が source 済みなのでそのまま `ros2` が使えます。
+
 ```bash
-docker compose exec so101-follower ros2 control list_hardware_components
-docker compose exec so101-follower ros2 control list_controllers
-docker compose exec so101-follower ros2 action list
-docker compose exec so101-follower ros2 topic echo /joint_states --once
+docker compose exec so101-follower /entrypoint.sh ros2 control list_hardware_components
+docker compose exec so101-follower /entrypoint.sh ros2 control list_controllers
+docker compose exec so101-follower /entrypoint.sh ros2 action list
+docker compose exec so101-follower /entrypoint.sh ros2 topic echo /joint_states --once
 ```
 
 期待する状態:
@@ -158,13 +166,13 @@ joint_state_broadcaster      joint_state_broadcaster/JointStateBroadcaster      
 モック相手に指令を投げて経路全体を検証します。
 
 ```bash
-docker compose exec so101-follower ros2 action send_goal \
+docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
   /joint_trajectory_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_flex_joint, wrist_flex_joint, wrist_roll_joint],
      points: [{positions: [0.3, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 3}}]}}" --feedback
 
-docker compose exec so101-follower ros2 action send_goal \
+docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
   /gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand \
   "{command: {name: [gripper_joint], position: [0.5]}}" --feedback
 ```
@@ -373,8 +381,8 @@ HARDWARE_TYPE=real docker compose up
 一瞬脱力してから保持に入ります。
 
 ```bash
-docker compose exec so101-follower ros2 control list_hardware_components
-docker compose exec so101-follower ros2 topic hz /joint_states     # 約 50 Hz
+docker compose exec so101-follower /entrypoint.sh ros2 control list_hardware_components
+docker compose exec so101-follower /entrypoint.sh ros2 topic hz /joint_states     # 約 50 Hz
 ```
 
 **まだ何も指令しないでください。** RViz の表示と実物を**2方向から**見比べます。
@@ -396,7 +404,7 @@ docker compose exec so101-follower ros2 topic hz /joint_states     # 約 50 Hz
 現在の `/joint_states` の値から、**1関節だけ ±0.10 rad** 変えて **4秒かけて**送ります。
 
 ```bash
-docker compose exec so101-follower ros2 action send_goal \
+docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
   /joint_trajectory_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_flex_joint, wrist_flex_joint, wrist_roll_joint],
@@ -426,7 +434,7 @@ docker compose exec -it so101-follower \
 ホーム → 控えめな姿勢 → ホーム を各6秒で。RViz が実物に追従することを確認します。
 
 ```bash
-docker compose exec so101-follower ros2 action send_goal \
+docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
   /gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand \
   "{command: {name: [gripper_joint], position: [0.6]}}" --feedback
 ```

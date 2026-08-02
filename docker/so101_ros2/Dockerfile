@@ -101,6 +101,16 @@ RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
 COPY docker/so101_ros2/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# ★ docker compose exec は ENTRYPOINT を通らないため、そのままでは setup.bash が
+#   source されず `ros2` が PATH に無い ("executable file not found in $PATH")。
+#   対話シェル (docker compose exec -it <svc> bash) 用に bashrc でも source しておく。
+#   単発コマンドは /entrypoint.sh を前置すること:
+#       docker compose exec so101-follower /entrypoint.sh ros2 topic list
+RUN printf '%s\n' \
+      'source /opt/ros/jazzy/setup.bash' \
+      'source /ros2_ws/install/setup.bash' \
+      >> /etc/bash.bashrc
+
 ENTRYPOINT ["/entrypoint.sh"]
 # 既定は mock_components。素の `docker run` では実機に触れない。
 CMD ["ros2", "launch", "so101_bringup", "follower.launch.py"]
