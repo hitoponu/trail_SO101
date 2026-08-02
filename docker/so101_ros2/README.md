@@ -209,17 +209,44 @@ docker compose run --rm so101-follower \
 
 ### 6.1 回転方向を確認する（これは必須）
 
-#### まず「+ 方向」がどっちかを実機なしで確認する
+#### 「+ 方向」は URDF から決まる（下の表がその答え）
 
-頭の中で右ねじを考える必要はありません。**モックに + の指令を出して見るのが確実です。**
-実機に触れないので Mac でもできます。手順4のモックをそのまま使います。
+頭の中で右ねじを考える必要も、GUI を開く必要もありません。
+URDF から一意に決まる値なので、**モック環境で TF を読んで測定済み**です。
+
+| 関節 | 回転軸（base_link） | **+ 方向** |
+| --- | --- | --- |
+| `shoulder_pan` | −Z | **上から見て時計回り**（手先が右へ） |
+| `shoulder_lift` | +Y | **腕が前に倒れる**（手先が下へ） |
+| `elbow_flex` | +Y | **同じ向きに曲がる**（手先が下へ） |
+| `wrist_flex` | +Y | **手首が下を向く** |
+| `wrist_roll` | −X | **正面から手先を見て時計回り** |
+| `gripper` | −Y | **開く**（URDF のゼロが「閉」のため） |
+
+ホーム姿勢（全関節 0）では手先 `gripper_frame_link` が
+`base_link` から `x=+0.391, y=0.000, z=+0.226 [m]`、
+各関節を +0.5 rad にしたときの手先変位は次のとおりでした。
+
+```
+shoulder_pan    Δ=[ -43.3  -169.0    -0.0] mm
+shoulder_lift   Δ=[ +13.2    +0.0  -167.9] mm
+elbow_flex      Δ=[ -37.4    +0.0  -140.7] mm
+wrist_flex      Δ=[ -23.3    +0.0   -75.4] mm
+wrist_roll      Δ=[  +0.0    -3.8    +1.1] mm   ← 軸まわりの回転なので手先はほぼ動かない
+```
+
+`wrist_roll` は手先が回転軸のほぼ上に乗っているため変位では判定できません。軸で判断します。
+
+#### 自分で確かめたい場合
+
+**この表は URDF から計算した値なので、確認は任意です。**
+確かめるならモック環境で指令を出し、RViz で見ます（手順4がそのまま使えます）。
 
 ```bash
 docker compose up          # HARDWARE_TYPE=mock_components (既定)
 ```
 
-別ターミナルから、**1関節だけ +0.5 rad** にして RViz を見ます。
-下の例は `shoulder_pan_joint`。配列の位置を変えれば他の関節になります
+別ターミナルから **1関節だけ +0.5 rad** にします。配列の位置を変えれば他の関節になります
 （順に shoulder_pan / shoulder_lift / elbow_flex / wrist_flex / wrist_roll）。
 
 ```bash
@@ -238,8 +265,14 @@ docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
   "{command: {name: [gripper_joint], position: [0.5]}}"
 ```
 
-**モデルがどちらへ回ったかを記録します。**定義上これが + 方向なので、
-解釈の余地がありません。
+**GUI を一切使わずに数値で確認することもできます**（RViz が開かない環境向け）。
+
+```bash
+docker compose exec so101-follower /entrypoint.sh \
+  ros2 run tf2_ros tf2_echo base_link gripper_frame_link
+```
+
+指令の前後で手先座標がどう変わるかを見れば、上の表と同じことが分かります。
 
 > **スライダで操作したい場合**（任意）:
 > ```bash
@@ -252,23 +285,18 @@ docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
 > その場合は `ros2 node list` に `joint_state_publisher_gui` が居るか確認し、
 > 居なければ上の send_goal 方式を使ってください。
 
-6関節ぶん、次のようにメモしておきます（実際の向きは実物で確認してください）。
-
-| 関節 | + 方向 |
-| --- | --- |
-| `shoulder_pan_joint` | （例）上から見て◯◯回り |
-| `shoulder_lift_joint` | （例）前へ倒れる／起き上がる |
-| … | … |
-
 > 理屈で確認したい場合: SO-101 は6関節とも `<axis xyz="0 0 1"/>` なので、
 > **子リンクのフレームの Z 軸（RViz の TF 表示で青）に右手の親指を向けたとき、
 > 指の巻く向き**が + です。子リンクは順に `shoulder_link` / `upper_arm_link` /
 > `lower_arm_link` / `wrist_link` / `gripper_link` / `jaw_link`。
 
-#### 次に実機で確かめる
+#### 次に実機で確かめる（ここが本題）
+
+上の表は **URDF（モデル）上の + 方向**です。**実機のサーボが同じ向きに回るかは
+別問題**なので、ここは飛ばせません。表は「こう回るはず」という期待値として使います。
 
 `so101_probe --torque-off --watch` を出したまま、**1関節ずつ**、
-上で調べた **+ 方向へ手で押して `Present` が増える**ことを確認します。
+表の **+ 方向へ手で押して `Present` が増える**ことを確認します。
 
 `Present` が**減る**関節は、サーボの回転方向が URDF の軸と逆です。
 ドライバに反転パラメータはないので、URDF の `<axis xyz>` の符号を
