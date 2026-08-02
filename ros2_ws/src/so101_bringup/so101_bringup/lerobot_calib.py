@@ -1,11 +1,25 @@
-"""lerobot の較正 JSON を feetech_ros2_driver の joint_config_file へ変換する。
+"""較正値を feetech_ros2_driver の joint_config_file へ変換する。
 
+較正値の入力元は2つ選べる。
+
+    # A) サーボの EEPROM から直接読む (JSON 不要。別の PC で作業するとき推奨)
+    ros2 run so101_bringup so101_calib \\
+        --from-servos --port /dev/so101_follower --from-ranges --emit-ranges
+
+    # B) lerobot の較正 JSON から読む (較正を実行した PC にしか無い)
     ros2 run so101_bringup so101_calib \\
         --json ~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_awesome_follower_arm.json \\
-        --delta shoulder_pan=0,shoulder_lift=0,elbow_flex=0,wrist_flex=0,wrist_roll=0,gripper=-790
+        --from-ranges --emit-ranges
+
+**較正値の実体はサーボの EEPROM にあり、JSON はその控えにすぎない。**
+lerobot の較正キャッシュは実行した PC のホームにしか無いので、
+別の PC で作業するときは A を使うこと。
+
+Δ (ゼロ点の補正量) は ``--from-ranges`` で可動域から自動計算できる (目測不要)。
+``--delta`` で関節ごとに上書きもできる。
 
 ────────────────────────────────────────────────────────────────
-なぜ Δ (delta) を手で渡すのか
+Δ をどう決めるか
 ────────────────────────────────────────────────────────────────
 lerobot と driver でレジスタも符号化も一致していることは確認済み:
 
@@ -146,6 +160,52 @@ def deltas_from_ranges(calib: dict, gripper_closed: str) -> tuple[dict[str, int]
     return out, notes
 
 
+def calib_from_servos(port: str, baudrate: int = 1_000_000) -> tuple[dict, list[str]]:
+    """サーボの EEPROM から較正値を直接読む（lerobot の JSON が不要になる）。
+
+    較正値の実体はサーボの EEPROM にあり、lerobot の JSON はその控えにすぎない。
+    JSON は較正を実行した PC にしか無いので、別の PC で作業するときは
+    こちらを使うほうが確実。
+
+    読むレジスタは lerobot の書き込み先と同じ:
+        Homing_Offset      reg 31 (sign-magnitude 符号ビット 11)
+        Min_Position_Limit reg 9
+        Max_Position_Limit reg 11
+    """
+    from so101_bringup.sts_probe import Probe  # 同一パッケージ内
+
+    ids = {name: idx for idx, name in enumerate(LEROBOT_TO_ROS, start=1)}
+    probe = Probe(port, list(ids.values()), baudrate=baudrate)
+    warnings: list[str] = []
+    calib: dict = {}
+    try:
+        for name, motor_id in ids.items():
+            row = probe.snapshot(motor_id)
+            if row["present"] is None:
+                raise SystemExit(
+                    f"ID {motor_id} ({name}) が応答しません。配線と電源を確認してください"
+                )
+            rmin, rmax = row["range_min"], row["range_max"]
+            calib[name] = {
+                "id": motor_id,
+                "drive_mode": 0,
+                "homing_offset": row["homing_offset"],
+                "range_min": rmin,
+                "range_max": rmax,
+            }
+            # 未較正のサーボは可動域が既定の 0..4095 のまま。
+            # wrist_roll は lerobot が意図的に 0..4095 にするので除外。
+            if name not in FULL_TURN_MOTORS and (rmin, rmax) == (0, MAX_TICK):
+                warnings.append(
+                    f"{name}: 可動域が 0..{MAX_TICK} のまま = **未較正の可能性**。"
+                    " この状態で --from-ranges を使っても意味のあるΔは出ない"
+                )
+    finally:
+        probe.close()
+
+    return calib, warnings
+
+
 def parse_deltas(text: str) -> dict[str, int]:
     if not text:
         return {}
@@ -235,7 +295,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="lerobot の較正 JSON を feetech_ros2_driver の joint_config_file へ変換する",
     )
-    parser.add_argument("--json", required=True, type=Path, help="lerobot の較正 JSON")
+    src = parser.add_mutually_exclusive_group(required=True)
+    src.add_argument("--json", type=Path, help="lerobot の較正 JSON を読む")
+    src.add_argument(
+        "--from-servos",
+        action="store_true",
+        help="サーボの EEPROM から較正値を直接読む（JSON 不要。別PCで作業するとき推奨）",
+    )
+    parser.add_argument("--port", default="/dev/so101_follower", help="--from-servos のときのポート")
+    parser.add_argument("--baudrate", type=int, default=1_000_000)
     parser.add_argument(
         "--from-ranges",
         action="store_true",
@@ -261,7 +329,19 @@ def main() -> None:
     parser.add_argument("-o", "--output", type=Path, help="出力先 (既定は標準出力)")
     args = parser.parse_args()
 
-    calib = json.loads(args.json.read_text())
+    if args.from_servos:
+        calib, warnings = calib_from_servos(args.port, args.baudrate)
+        print(f"# --from-servos: {args.port} のサーボから較正値を読んだ", file=sys.stderr)
+        for w in warnings:
+            print(f"# 警告: {w}", file=sys.stderr)
+    else:
+        if not args.json.exists():
+            raise SystemExit(
+                f"較正 JSON が見つかりません: {args.json}\n"
+                "  この PC で lerobot の較正をしていない場合、そのファイルは存在しません。\n"
+                "  --from-servos を使うとサーボから直接読めます (JSON 不要)。"
+            )
+        calib = json.loads(args.json.read_text())
 
     deltas: dict[str, int] = {}
     if args.from_ranges:
@@ -288,7 +368,8 @@ def main() -> None:
             print(f"エラー: {message}", file=sys.stderr)
         raise SystemExit(1)
 
-    text = dump_yaml(joints, args.json, deltas)
+    source = args.json if args.json else Path(f"servo EEPROM ({args.port})")
+    text = dump_yaml(joints, source, deltas)
     if args.output:
         args.output.write_text(text)
         print(f"書き出しました: {args.output}", file=sys.stderr)

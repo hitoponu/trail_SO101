@@ -94,10 +94,13 @@ LeKiwi の基板も繋いでいる場合は、`/dev/lekiwi` と `/dev/so101_foll
 （トルクは入ったままなので、アームは最後の指令位置で止まります）。
 復帰にはスタックの再起動が必要です。
 
-ハブを使う場合は次を守ってください。
+ハブを使う場合の注意点。
 
-- **給電付き（セルフパワー）ハブを使う** — バスパワーハブは避ける
-- **カメラなど帯域を食うデバイスと同じハブに挿さない** — これが一番効きます
+- **バスパワーハブでも問題ありません。** サーボの電源は基板の DC ジャックから
+  別途供給されており、USB から取るのはブリッジ IC とロジックの分だけなので
+  消費はごくわずかです
+- **カメラなど帯域を食うデバイスと同じハブに挿さない** — これが一番効きます。
+  リスクは電力ではなく帯域と遅延です
 - 安価なハブは避ける
 
 `99-so101.rules` の `ID_MM_DEVICE_IGNORE`（ModemManager 対策）は
@@ -198,8 +201,37 @@ docker compose run --rm so101-follower \
 
 ### 6.1 回転方向を確認する（これは必須）
 
-**1関節ずつ**、**RViz で + 方向に見える向き**へ手で押して、
-`Present` が**増える**ことを確認します。
+#### まず「+ 方向」がどっちかを実機なしで確認する
+
+頭の中で右ねじを考える必要はありません。**スライダを動かして見るのが確実です。**
+実機に触れないので、これは Mac でもできます。
+
+```bash
+docker compose run --rm --service-ports so101-follower \
+  ros2 launch so_arm101_description view_description.launch.py rviz:=true
+```
+
+`joint_state_publisher_gui` のスライダが関節ごとに出ます。
+**各関節のスライダを + 側（右）へ動かし、モデルがどちらへ回るかを記録します。**
+定義上これが + 方向なので、解釈の余地がありません。
+
+6関節ぶん、次のようにメモしておきます（実際の向きは実物で確認してください）。
+
+| 関節 | + 方向 |
+| --- | --- |
+| `shoulder_pan_joint` | （例）上から見て◯◯回り |
+| `shoulder_lift_joint` | （例）前へ倒れる／起き上がる |
+| … | … |
+
+> 理屈で確認したい場合: SO-101 は6関節とも `<axis xyz="0 0 1"/>` なので、
+> **子リンクのフレームの Z 軸（RViz の TF 表示で青）に右手の親指を向けたとき、
+> 指の巻く向き**が + です。子リンクは順に `shoulder_link` / `upper_arm_link` /
+> `lower_arm_link` / `wrist_link` / `gripper_link` / `jaw_link`。
+
+#### 次に実機で確かめる
+
+`so101_probe --torque-off --watch` を出したまま、**1関節ずつ**、
+上で調べた **+ 方向へ手で押して `Present` が増える**ことを確認します。
 
 `Present` が**減る**関節は、サーボの回転方向が URDF の軸と逆です。
 ドライバに反転パラメータはないので、URDF の `<axis xyz>` の符号を
@@ -214,12 +246,21 @@ SO-101 の new_calib の規約は「各関節の仮想ゼロ＝**可動域の中
 **機械的な可動端**を記録しています。可動端は客観的で再現性があるので、
 そこからゼロ位置を逆算できます。
 
+**較正値はサーボの EEPROM から直接読めます。lerobot の JSON は不要です。**
+
 ```bash
-docker compose run --rm \
-  -v ~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_awesome_follower_arm.json:/calib.json:ro \
-  so101-follower ros2 run so101_bringup so101_calib \
-    --json /calib.json --from-ranges --emit-ranges
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_calib \
+    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges
 ```
+
+> lerobot の較正キャッシュ（`~/.cache/huggingface/...`）は
+> **較正を実行した PC のホームにしか存在しません**。別の PC で作業している場合、
+> そのパスを `-v` でマウントしようとすると Docker が空ディレクトリを作り、
+> `IsADirectoryError: Is a directory: '/calib.json'` になります。
+> `--from-servos` ならこの問題自体が起きません。
+>
+> JSON から読みたい場合は `--json <path>` を使います（両者は排他）。
 
 この機体の較正値では次のように出ます。
 
@@ -312,8 +353,10 @@ JSON が要るのは `so101_calib` で明示的な YAML を作るとき（Phase 
 その目的は再現性で、サーボを工場出荷リセットしても設定を復元できる、
 2台目の機体に同じ設定を配れる、という利点があります。
 
-JSON が無い場合でも、`so101_probe` が EEPROM から
-`Homing offset` / `Min` / `Max` を読めるので、そこから YAML を起こせます。
+JSON が無い場合は **`so101_calib --from-servos`** が EEPROM から
+`Homing offset` / `Min` / `Max` を読んで直接 YAML を起こします（6.2 参照）。
+lerobot の較正キャッシュは実行した PC のホームにしか無いので、
+**別の PC で作業する場合はこちらが本筋**です。
 
 ただし、**一度も較正していないサーボはどこかで較正する必要があります**
 （lerobot の `lerobot-calibrate` でも、手で書いても構いません）。
@@ -430,8 +473,8 @@ read タイムアウトは 5ms しかなく、タイムアウト時のリトラ�
 
 1. **ModemManager** が接続直後にポートを探っている（最も多い）。
    `99-so101.rules` を導入したか、`systemctl status ModemManager` を確認
-2. **USBハブ** — 給電付きか、カメラと同じハブに挿していないかを確認。
-   切り分けとして一度直結してみる
+2. **USBハブ** — カメラなど帯域を食うデバイスと同じハブに挿していないか確認
+   （バスパワーかどうかは関係ありません）。切り分けとして一度直結してみる
 3. ケーブルの品質・長さ、コネクタの接触
 
 ### `Command of at least one joint is out of limits` が ERROR で出続ける

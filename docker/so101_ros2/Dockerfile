@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-yaml \
       ros-jazzy-feetech-ros2-driver \
       ros-jazzy-joint-state-broadcaster \
+      ros-jazzy-joint-state-publisher-gui \
       ros-jazzy-joint-trajectory-controller \
       ros-jazzy-parallel-gripper-controller \
       ros-jazzy-position-controllers \
