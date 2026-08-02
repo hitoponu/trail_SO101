@@ -81,6 +81,25 @@ docker compose run --rm so101-follower \
 
 ---
 
+## Mac 側とのやり取り
+
+git 経由で連絡します。詳細は **`docs/agent/README.md`**。
+
+| ファイル | 書く | 読む |
+| --- | --- | --- |
+| `docs/agent/request.md` | Mac のみ | **あなた** |
+| `docs/agent/report.md` | **あなたのみ** | Mac |
+
+**自分が所有していないファイルを編集しないこと。**
+
+```bash
+git pull                        # 作業前に必ず
+# request.md を読んで実行、report.md を書く
+git add docs/agent/report.md
+git commit -m "chore(agent): 報告 - <一行>"
+git push
+```
+
 ## 報告のしかた
 
 ### 出力は加工しない
