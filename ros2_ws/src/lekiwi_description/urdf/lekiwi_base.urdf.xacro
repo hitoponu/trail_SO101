@@ -2,12 +2,15 @@
 <!--
   LeKiwi ベースのトップレベル記述。
 
-    xacro lekiwi_base.urdf.xacro                     # 基本図形
-    xacro lekiwi_base.urdf.xacro use_mesh:=true      # CAD メッシュ (要 meshes/)
+    xacro lekiwi_base.urdf.xacro                     # 基本図形 (既定)
+    xacro lekiwi_base.urdf.xacro use_mesh:=true      # CAD メッシュ
 
-  use_mesh:=true を使うには lekiwi_description/meshes/ に STL を置く必要がある。
-  リポジトリ肥大 (オムニホイール 1 個で 15.7MB / 31 万ポリゴン) を避けるため
-  既定では同梱していない。
+  メッシュは meshes/ に同梱済み。車輪は 31 万面 → 2 万面へ間引いてある
+  (元のままだとソフトウェアレンダリングで rviz2 が落ちる)。
+  出自と再生成方法は meshes/README.md を参照。
+
+  既定を基本図形のままにしているのは、TF を見るだけなら十分でメッシュの
+  読み込みが要らないため。衝突形状は use_mesh に関わらずプリミティブ。
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
 
