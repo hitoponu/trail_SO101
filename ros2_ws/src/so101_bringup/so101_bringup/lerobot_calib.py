@@ -233,9 +233,20 @@ def convert(calib: dict, deltas: dict[str, int], emit_ranges: bool) -> tuple[dic
 
         homing = int(entry["homing_offset"]) + delta
         if abs(homing) > MAX_HOMING_OFFSET:
+            # この関節はゼロがエンコーダの折り返し点付近にあり、現在の homing_offset は
+            # 「またいでも Present が連続になる」よう選ばれている。Δ を足すと
+            # レジスタの表現範囲を超える。等価な (homing - 4096) はレジスタには
+            # 収まるが、今度は Present 側が折り返しをまたぐため安全ではない。
+            over = abs(homing) - MAX_HOMING_OFFSET
             errors.append(
-                f"{name}: homing_offset={homing} が ±{MAX_HOMING_OFFSET} を超える。"
-                " driver が on_init でクラッシュするので却下する"
+                f"{name}: homing_offset={homing} が ±{MAX_HOMING_OFFSET} を"
+                f"{over} tick 超える (driver が on_init でクラッシュするので却下)。\n"
+                f"    原因: この関節はゼロがエンコーダの折り返し点付近にあり、\n"
+                f"          現在の homing_offset={int(entry['homing_offset'])} はそれを吸収している。\n"
+                f"    対処 A: --delta {name}=0 で補正を諦める"
+                f" (この関節が {delta * 360 / 4096:+.1f}° ずれたままになる)\n"
+                f"    対処 B: この関節を URDF ゼロ姿勢付近に置いて lerobot の較正をやり直す\n"
+                f"            (homing_offset が中央寄りになり、この問題が消える)"
             )
 
         out: dict = {"id": int(entry["id"])}
