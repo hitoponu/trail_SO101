@@ -119,6 +119,27 @@ class Probe:
                 return True
         return False
 
+    def set_pid(self, p: int, i: int, d: int) -> None:
+        """PID を全モータへ書く。
+
+        P_Coefficient(21) 等は EEPROM 領域なので、書く前に Lock(55) を
+        解錠する必要がある。トルクは切ったままにする（安全のため）。
+
+        ★ この値は次に ros2_control を起動したとき URDF の <param> で
+          上書きされる。あくまで「値を探すための実験用」であり、
+          決まった値は control/so101_follower.ros2_control.xacro に書くこと。
+        """
+        for motor_id in self.ids:
+            self.write(TORQUE_ENABLE, motor_id, 0)
+            self.write(LOCK, motor_id, 0)
+            ok = all([
+                self.write(P_COEFFICIENT, motor_id, p),
+                self.write(I_COEFFICIENT, motor_id, i),
+                self.write(D_COEFFICIENT, motor_id, d),
+            ])
+            self.write(LOCK, motor_id, 1)
+            print(f"  ID {motor_id}: P={p} I={i} D={d} {'OK' if ok else '★書き込み失敗'}")
+
     def disable_torque(self) -> None:
         for motor_id in self.ids:
             self.write(TORQUE_ENABLE, motor_id, 0)
@@ -180,6 +201,12 @@ def main() -> None:
     parser.add_argument("--baudrate", type=int, default=1_000_000)
     parser.add_argument("--scan", action="store_true", help="1回読んで終了")
     parser.add_argument(
+        "--set-pid",
+        metavar="P[,I,D]",
+        help="PID を全モータへ書く (実験用。例: --set-pid 32 または --set-pid 32,0,32)。"
+        " ros2_control を起動すると URDF の値で上書きされる",
+    )
+    parser.add_argument(
         "--torque",
         action="store_true",
         help="トルク関連のレジスタ (PID・トルク上限・保護電流) を読む",
@@ -198,6 +225,16 @@ def main() -> None:
 
     probe = Probe(args.port, ids, baudrate=args.baudrate)
     try:
+        if args.set_pid:
+            parts = [int(x) for x in args.set_pid.split(",")]
+            p_, i_, d_ = (parts + [0, 32])[:3] if len(parts) == 1 else parts
+            print(f"PID を書き込みます (P={p_} I={i_} D={d_})。トルクは切ったままです。")
+            probe.set_pid(p_, i_, d_)
+            print()
+            print("★ この値は ros2_control 起動時に URDF の <param> で上書きされます。")
+            print("  決まった値は control/so101_follower.ros2_control.xacro へ書いてください。")
+            return
+
         if args.torque:
             print(" id      P    D    I  MaxTorque  TorqueLim  ProtCurrent  Overload")
             print("--- ------ ---- ---- ---------- ---------- ------------ ---------")

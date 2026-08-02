@@ -583,6 +583,42 @@ docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
 
 **JTC で低く自立する姿勢へ動かしてから** `Ctrl+C` してください。
 
+## 設定を変えて試す（再ビルド不要）
+
+offset や PID を詰めるとき、毎回 `docker compose build` を回すのは面倒です。
+**開発用オーバーレイを使うと、編集して再起動するだけで反映されます。**
+
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml up
+```
+
+### なぜ再ビルドが要らないのか
+
+イメージは `colcon build --symlink-install` でビルドしてあり、
+install 空間のファイルは実体ではなく symlink です。連鎖をたどると:
+
+```
+install/so101_bringup/share/.../so101_offsets.xacro
+  -> build/so101_bringup/config/so101_offsets.xacro
+    -> src/so101_bringup/config/so101_offsets.xacro
+```
+
+最終的に `/ros2_ws/src/so101_bringup` を読んでいるので、
+そこをホスト側のソースで上書きマウントすれば編集が直接効きます。
+
+### 反映されるもの / されないもの
+
+| | 再ビルド |
+| --- | --- |
+| `config/*.xacro`（offset・PID）、`control/*.xacro`、`launch/*.py`、Python | **不要** |
+| ファイルの新規追加 | 必要（colcon が symlink を張り直す） |
+| `setup.py` / `package.xml` の変更 | 必要 |
+| Dockerfile、apt パッケージ | 必要 |
+
+> **本番では使わないでください。** ホストのソースがイメージの中身を隠すので、
+> 「ビルドしたものがそのまま動く」という再現性が失われます。
+> 値が決まったら commit し、`docker compose build` で焼き込んでください。
+
 ## トラブルシュート
 
 ### `No such file or directory: /dev/so101_follower`
@@ -638,6 +674,48 @@ read タイムアウトは 5ms しかなく、タイムアウト時のリトラ�
 
 同じく velocity バグの影響です。`stall_velocity_threshold` を大きく
 （100.0）してあるか確認してください。
+
+### モータの保持力が弱い（特に対話操作で）
+
+**P ゲインを確認してください。** 位置制御のトルクは概ね `P × 位置偏差` です。
+
+```bash
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_probe --port /dev/so101_follower --torque
+```
+
+- `send_goal` … 時間軸のある軌道なので指令が実位置を先行し、**偏差が持続** → 力が出る
+- 対話操作 … 指令が実位置に張り付くので **偏差がほぼゼロ** → 力が出ない
+
+**「対話型でだけ弱い」ならこれが原因です。**
+
+STS3215 の工場出荷値は `P=32` ですが、**lerobot は振動回避のため 16 に下げます**
+（`so_follower.configure()` の `# to avoid shakiness (Default is 32)`）。
+この構成では **32 に戻して**あります
+（`control/so101_follower.ros2_control.xacro` の `so101_p_gain`）。
+
+振動する場合は 24 → 20 → 16 と下げてください。
+実機で素早く試すなら、ROS を止めた状態で直接書けます。
+
+```bash
+docker compose down
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_probe --port /dev/so101_follower --set-pid 24
+```
+
+> この値は次に ros2_control を起動すると URDF の値で上書きされます。
+> **値を探すための実験用**です。決まったら xacro に書いてください
+> （上記の開発用オーバーレイを使えば再ビルド不要）。
+
+それでも弱い場合は次の2つを疑ってください。
+
+- **電源電圧**。`--scan` の `V` 列を確認。このアームは 7.4V 版サーボ
+  （許容 4.0〜8.0V）で、拘束トルクは概ね電圧比例です。
+  実測 4.9V なら定格の約 66%、7.4V にすれば約 1.5 倍になります
+  （**8.0V を超えないこと**）
+- **グリッパだけ弱い場合**は `Max_Torque_Limit`。lerobot が焼損防止のため
+  グリッパのみ 500（最大 1000 の 50%）を EEPROM に書きます。
+  driver v0.2.2 はこのレジスタを触らないので、その値が残っています
 
 ### RViz に SO-101 ではなく別のロボットが表示される
 

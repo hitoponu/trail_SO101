@@ -37,6 +37,27 @@
   <!-- 機体ごとの offset（URDF ゼロにおける Present tick）-->
   <xacro:include filename="$(find so101_bringup)/config/so101_offsets.xacro"/>
 
+  <!--
+    ★ サーボの PID。ここが「保持力の強さ」を決める調整ノブ。
+
+    位置制御のトルクは概ね `P × 位置偏差` なので、P が小さいと
+    **偏差が小さい場面で力が出ない**。
+      send_goal … 時間軸のある軌道で指令が実位置を先行 → 偏差が持続 → 力が出る
+      対話操作  … 指令が実位置に張り付く → 偏差ほぼゼロ → 力が出ない
+    「対話型でだけ弱い」のはこれが原因。
+
+    STS3215 の工場出荷値は P=32。lerobot は so_follower.configure() で
+    振動(shakiness)回避のため 16 へ下げているが、そのぶん保持力が落ちる。
+    ここでは **工場出荷値の 32 に戻している**。
+
+    振動する場合は 24 → 20 → 16 と下げること。
+    実機で素早く試すには so101_probe の set_pid オプションが使える
+    (docker/so101_ros2/README.md 参照)。値が決まったらここへ書き戻す。
+  -->
+  <xacro:property name="so101_p_gain" value="32"/>
+  <xacro:property name="so101_i_gain" value="0"/>
+  <xacro:property name="so101_d_gain" value="32"/>
+
   <xacro:macro
     name="ros2_control"
     params="prefix ros2_control_hardware_type usb_port"
@@ -58,7 +79,9 @@
         正しい綴りに直すと v0.2.2 は読まず、PID が一切設定されない。
         driver を main 系へ上げるときは同時に直すこと。
       -->
-      <xacro:macro name="sts_joint" params="name id offset p:=16 i:=0 d:=32">
+      <xacro:macro name="sts_joint"
+                   params="name id offset
+                           p:=${so101_p_gain} i:=${so101_i_gain} d:=${so101_d_gain}">
         <joint name="${prefix}${name}">
           <param name="id">${id}</param>
           <param name="offset">${offset}</param>

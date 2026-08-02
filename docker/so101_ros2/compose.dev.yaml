@@ -1,0 +1,40 @@
+# 開発用のオーバーレイ。設定を編集して即試すためのもの。
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up
+#
+# ■ なぜこれで再ビルドが要らなくなるのか
+#
+# イメージは `colcon build --symlink-install` でビルドしてあり、
+# install 空間のファイルは実体ではなく symlink になっている。
+# 連鎖をたどると:
+#
+#   install/so101_bringup/share/.../so101_offsets.xacro
+#     -> build/so101_bringup/config/so101_offsets.xacro
+#       -> src/so101_bringup/config/so101_offsets.xacro
+#
+# つまり最終的に `/ros2_ws/src/so101_bringup` を読んでいる。
+# そこをホスト側のソースで上書きマウントすれば、
+# **編集 → コンテナ再起動だけで反映される**（docker compose build は不要）。
+#
+# ■ これで反映されるもの
+#   config/*.xacro  … offset、PID ゲイン
+#   control/*.xacro … ros2_control の記述
+#   launch/*.py     … launch ファイル
+#   so101_bringup/*.py … so101_probe / so101_calib などの Python
+#
+# ■ これでは反映されないもの（docker compose build が要る）
+#   * ファイルの新規追加（colcon が symlink を張り直す必要がある）
+#   * setup.py / package.xml の変更（entry_points や依存の再生成が要る）
+#   * Dockerfile の変更、apt パッケージの追加
+#
+# ■ 本番では使わないこと
+# ホストのソースがイメージの中身を隠すので、
+# 「ビルドしたものがそのまま動く」という再現性が失われる。
+# 値が決まったら必ず commit し、`docker compose build` で焼き込むこと。
+
+services:
+  so101-follower:
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # 読み取り専用。コンテナからホストのソースを書き換えさせない。
+      - ../../ros2_ws/src/so101_bringup:/ros2_ws/src/so101_bringup:ro
