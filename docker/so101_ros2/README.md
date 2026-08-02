@@ -211,17 +211,46 @@ docker compose run --rm so101-follower \
 
 #### まず「+ 方向」がどっちかを実機なしで確認する
 
-頭の中で右ねじを考える必要はありません。**スライダを動かして見るのが確実です。**
-実機に触れないので、これは Mac でもできます。
+頭の中で右ねじを考える必要はありません。**モックに + の指令を出して見るのが確実です。**
+実機に触れないので Mac でもできます。手順4のモックをそのまま使います。
 
 ```bash
-docker compose run --rm --service-ports so101-follower \
-  ros2 launch so_arm101_description view_description.launch.py rviz:=true
+docker compose up          # HARDWARE_TYPE=mock_components (既定)
 ```
 
-`joint_state_publisher_gui` のスライダが関節ごとに出ます。
-**各関節のスライダを + 側（右）へ動かし、モデルがどちらへ回るかを記録します。**
-定義上これが + 方向なので、解釈の余地がありません。
+別ターミナルから、**1関節だけ +0.5 rad** にして RViz を見ます。
+下の例は `shoulder_pan_joint`。配列の位置を変えれば他の関節になります
+（順に shoulder_pan / shoulder_lift / elbow_flex / wrist_flex / wrist_roll）。
+
+```bash
+docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
+  /joint_trajectory_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_flex_joint, wrist_flex_joint, wrist_roll_joint],
+     points: [{positions: [0.5, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 2}}]}}"
+```
+
+グリッパは別アクションです。
+
+```bash
+docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
+  /gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand \
+  "{command: {name: [gripper_joint], position: [0.5]}}"
+```
+
+**モデルがどちらへ回ったかを記録します。**定義上これが + 方向なので、
+解釈の余地がありません。
+
+> **スライダで操作したい場合**（任意）:
+> ```bash
+> docker compose run --rm --service-ports so101-follower \
+>   ros2 launch so_arm101_description view_description.launch.py rviz:=true
+> ```
+> ただし `joint_state_publisher_gui` は Qt が初期化できないと
+> `[ros2run]: Aborted` で落ちます。**RViz は別プロセスなので生き残るため、
+> 「モデルは見えるがスライダが無い＝動かない」**という分かりにくい症状になります。
+> その場合は `ros2 node list` に `joint_state_publisher_gui` が居るか確認し、
+> 居なければ上の send_goal 方式を使ってください。
 
 6関節ぶん、次のようにメモしておきます（実際の向きは実物で確認してください）。
 
@@ -501,6 +530,28 @@ read タイムアウトは 5ms しかなく、タイムアウト時のリトラ�
 
 同じく velocity バグの影響です。`stall_velocity_threshold` を大きく
 （100.0）してあるか確認してください。
+
+### RViz にモデルは出るが、スライダで動かせない
+
+`view_description.launch.py` を使った場合、`joint_state_publisher_gui` が
+Qt を初期化できずに落ちている可能性が高いです。**RViz は別プロセスなので
+生き残る**ため、「モデルは見えるのに動かない」という症状になります。
+
+```bash
+# jsp_gui が生きているか
+docker compose exec so101-follower /entrypoint.sh ros2 node list | grep joint_state_publisher
+# launch のログに "no Qt platform plugin could be initialized" が出ていないか
+```
+
+URDF と `robot_state_publisher` 自体は無関係です（切り分けは下記）。
+
+```bash
+# GUI を使わずに /joint_states を出して TF が動くか確認する
+docker compose exec so101-follower /entrypoint.sh ros2 run joint_state_publisher joint_state_publisher &
+docker compose exec so101-follower /entrypoint.sh ros2 run tf2_ros tf2_echo base_link shoulder_link
+```
+
+TF が出るなら配管は正常なので、6.1 の `send_goal` 方式に切り替えてください。
 
 ### RVizが開かない／QtまたはGLXエラー
 
