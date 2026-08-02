@@ -115,14 +115,99 @@ docker compose build
 **まずサーボに通電しない状態でドライランしてください。**
 シリアルを開かずに運動学・オドメトリ・TF・RViz の全経路を検証できます。
 
+サーボコントローラを **USB 接続したまま通電しない** 場合（`/dev/lekiwi` は見える）:
+
 ```bash
 DRY_RUN=true docker compose up
 ```
+
+**実機がまだ手元に無い場合**は `compose.dryrun.yaml` を使います。
+
+```bash
+docker compose -f compose.dryrun.yaml build
+docker compose -f compose.dryrun.yaml up
+```
+
+> `compose.yaml` は `devices:` でシリアルデバイスを無条件にマップするため、
+> デバイスノードが存在しないホストでは `DRY_RUN=true` を付けても
+> `error gathering device information ... no such file or directory` で
+> **起動できません**（コンテナ生成前に daemon が出すエラーなので環境変数では
+> 回避できず、Compose のリストマージでは `devices` を除去できません）。
+> `compose.dryrun.yaml` は `devices` / `group_add` を持たず `dry_run:=true` を
+> 固定した専用ファイルで、ビルド対象は本番と同一イメージです。
 
 RVizに車体モデルが表示され、TF が
 `odom → base_footprint → base_link → base_*_wheel_link` で繋がっていれば
 ソフト側は正常です。マゼンタの小さい箱は **取付位置が未実測**のフレーム
 （`laser_link` と `camera_mount_link`）の目印です。
+
+### 単体テスト（実機も ROS 2 も不要）
+
+`kinematics.py` と `raycast.py` は numpy しか import しないため、Docker を立てずに
+単体で回せます。
+Phase D の前に「運動学は正しい」と言い切れる状態を作っておくと、実機で向きが
+おかしかったときに配線・符号の問題へ切り分けられます。
+
+```bash
+cd ../../ros2_ws/src/lekiwi_base_bringup
+uv run --no-project --with pytest --with numpy pytest test/ -v
+```
+
+運動学側は飽和時の3輪比例縮小、往復の一致、README 6.2 の Phase D が前提にしている
+符号の規約、`max_ticks` から逆算される到達可能速度を固定しています。
+レイキャスト側（`fake_scan` の距離計算）は壁までの距離、最近傍の優先、後方の
+レイを拾わないこと、NaN を出さないことを固定しています。全 70 件。
+コンテナ内から `colcon test` でも実行できます。
+
+### 実機なしで SLAM / Nav2 を回す
+
+`fake_scan`（仮想 2D LiDAR）を使うと、シリアルも LiDAR も無い状態で
+「走らせる → 地図ができる → ゴールを与えると経路を追従する」まで閉ループで
+検証できます。
+
+```bash
+docker compose -f compose.dryrun.yaml run --rm --service-ports lekiwi-base-dryrun \
+  ros2 launch lekiwi_base_bringup sim_nav.launch.py
+```
+
+RViz が開いたら "2D Goal Pose" でゴールを与えます。コマンドからも送れます。
+
+```bash
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: 1.5, y: 1.2}, orientation: {w: 1.0}}}'
+```
+
+構成は次のとおりで、`/scan` の供給元が実機の LiDAR ではなく `fake_scan` に
+なっているだけです。
+
+```
+base_driver (dry_run) ←─ /cmd_vel ←─ Nav2 (MPPI, Omni)
+      │ odom, TF                          ↑
+      ↓                                   │ /map, TF (map→odom)
+fake_scan ──/scan──→ slam_toolbox ────────┘
+```
+
+既定の仮想世界は 5m x 4m の部屋に箱を 2 つ置いたもの
+（`config/fake_scan.yaml` で変更できます）。
+
+**既定のままでは SLAM のロバスト性は検証できません。** `dry_run` の
+オドメトリは指令値の積分で誤差ゼロなので、スキャンマッチングが自明に成功します。
+意味のある検証にするには odom へ系統誤差を入れてください。
+
+```bash
+# odom が実際より 3% 多く報告する状態（車輪半径の見積もり誤りに相当）
+ros2 launch lekiwi_base_bringup sim_nav.launch.py odom_trans_scale:=1.03
+```
+
+RViz でオレンジの線（`/fake_scan/world` = 真の壁）と SLAM の地図を重ねると、
+地図の歪みが見えます。
+
+#### ここで検証できないこと
+
+- **Phase D**（車輪の回転方向・前方向・鏡像の確定）は代替できません。未確定の
+  ままだと Nav2 が正しい `/cmd_vel` を出しても機体は違う方向へ走ります。
+- `laser_link` の取付位置は URDF の仮値（z=0.09）です。実機では実測値へ。
+- スリップ、床面摩擦、サーボの追従遅れ、実際の地図品質。
 
 問題なければ実機を接続して起動します。
 
@@ -142,12 +227,21 @@ docker compose down
 
 別ターミナルからコンテナ内で確認できます。
 
+> **`/entrypoint.sh` を挟むのは必須です。** `docker compose exec` はイメージの
+> ENTRYPOINT を通らないため、`/opt/ros/jazzy/setup.bash` が source されず
+> `exec: "ros2": executable file not found in $PATH` になります。
+> `entrypoint.sh` は source して `exec "$@"` するだけなので、これで解決します。
+> （`docker compose run` は ENTRYPOINT を通るので、そちらは不要です。）
+>
+> `compose.dryrun.yaml` を使っている場合はサービス名も読み替えてください:
+> `docker compose -f compose.dryrun.yaml exec lekiwi-base-dryrun /entrypoint.sh ros2 ...`
+
 ```bash
-docker compose exec lekiwi-base ros2 topic list
-docker compose exec lekiwi-base ros2 topic hz /odom
-docker compose exec lekiwi-base ros2 topic echo /joint_states --once
-docker compose exec lekiwi-base ros2 run tf2_tools view_frames
-docker compose exec lekiwi-base ros2 run tf2_ros tf2_echo odom base_footprint
+docker compose exec lekiwi-base /entrypoint.sh ros2 topic list
+docker compose exec lekiwi-base /entrypoint.sh ros2 topic hz /odom
+docker compose exec lekiwi-base /entrypoint.sh ros2 topic echo /joint_states --once
+docker compose exec lekiwi-base /entrypoint.sh ros2 run tf2_tools view_frames
+docker compose exec lekiwi-base /entrypoint.sh ros2 run tf2_ros tf2_echo odom base_footprint
 ```
 
 期待する主なトピックは次のとおりです。
@@ -160,7 +254,7 @@ docker compose exec lekiwi-base ros2 run tf2_ros tf2_echo odom base_footprint
 ドライランのまま `/cmd_vel` を流せば、ハードウェア無しで運動学からTFまでを検証できます。
 
 ```bash
-docker compose exec lekiwi-base \
+docker compose exec lekiwi-base /entrypoint.sh \
   ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.1}}'
 ```
 
@@ -177,10 +271,10 @@ publish を止めて0.5秒後に速度がゼロに戻れば、ウォッチドッ
 書き込む診断用パラメータです。1輪ずつ切り分けられます。
 
 ```bash
-docker compose exec lekiwi-base ros2 param set /lekiwi_base_driver test_wheel_ticks "[300,0,0]"   # 左輪のみ
-docker compose exec lekiwi-base ros2 param set /lekiwi_base_driver test_wheel_ticks "[0,300,0]"   # 後輪のみ
-docker compose exec lekiwi-base ros2 param set /lekiwi_base_driver test_wheel_ticks "[0,0,300]"   # 右輪のみ
-docker compose exec lekiwi-base ros2 param set /lekiwi_base_driver test_wheel_ticks "[0,0,0]"     # 通常動作へ戻す
+docker compose exec lekiwi-base /entrypoint.sh ros2 param set /lekiwi_base_driver test_wheel_ticks "[300,0,0]"   # 左輪のみ
+docker compose exec lekiwi-base /entrypoint.sh ros2 param set /lekiwi_base_driver test_wheel_ticks "[0,300,0]"   # 後輪のみ
+docker compose exec lekiwi-base /entrypoint.sh ros2 param set /lekiwi_base_driver test_wheel_ticks "[0,0,300]"   # 右輪のみ
+docker compose exec lekiwi-base /entrypoint.sh ros2 param set /lekiwi_base_driver test_wheel_ticks "[0,0,0]"     # 通常動作へ戻す
 ```
 
 **3輪それぞれについて、外側から見たリムの回転方向を記録してから**次へ進んでください。
@@ -188,7 +282,7 @@ docker compose exec lekiwi-base ros2 param set /lekiwi_base_driver test_wheel_ti
 過負荷でサーボが停止した場合は、復帰サービスでラッチを解除できます。
 
 ```bash
-docker compose exec lekiwi-base ros2 service call /lekiwi_base_driver/recover std_srvs/srv/Trigger
+docker compose exec lekiwi-base /entrypoint.sh ros2 service call /lekiwi_base_driver/recover std_srvs/srv/Trigger
 ```
 
 ### 6.2 向きと符号を確定する（3つのノブを順に）
@@ -263,7 +357,7 @@ RViz上で車輪が逆回転して見える場合は表示だけの問題で、�
 
 ```bash
 docker compose up -d
-docker compose exec -it lekiwi-base \
+docker compose exec -it lekiwi-base /entrypoint.sh \
   ros2 run teleop_twist_keyboard teleop_twist_keyboard \
     --ros-args -p speed:=0.1 -p turn:=0.5
 ```
@@ -329,7 +423,7 @@ grep DIALOUT_GID .env
 ### ホイールが回らない（通信は成功している）
 
 ```bash
-docker compose exec lekiwi-base \
+docker compose exec lekiwi-base /entrypoint.sh \
   ros2 run lekiwi_base_bringup sts_bus --port /dev/lekiwi --diagnostics
 ```
 
@@ -368,8 +462,12 @@ docker compose up --force-recreate
 
 - `Dockerfile`: ROS 2 Jazzy、feetech-servo-sdk、RViz、ドライバのビルド
 - `compose.yaml`: シリアルデバイス、ホストネットワーク、X11をコンテナへ渡す設定
+- `compose.dryrun.yaml`: 実機なし検証用（`devices` を持たず `dry_run:=true` 固定）
 - `99-lekiwi.rules`: 安定した `/dev/lekiwi` 名、dialout権限、ModemManager除外
 - `../../ros2_ws/src/lekiwi_base_bringup`: ドライバ本体、launch、設定、RViz
+- `../../ros2_ws/src/lekiwi_base_bringup/test`: 運動学とレイキャストの単体テスト（ROS 2 不要）
+- `../../ros2_ws/src/lekiwi_base_bringup/config/nav2.yaml`: Nav2 設定（オムニ向け差分入り）
+- `../../ros2_ws/src/lekiwi_base_bringup/config/fake_scan.yaml`: 仮想 LiDAR と仮想世界
 - `../../ros2_ws/src/lekiwi_description`: URDF/xacro（基本図形。`use_mesh:=true` で拡張可）
 
 LeKiwi 本体: https://github.com/SIGRobotics-UIUC/LeKiwi

@@ -90,7 +90,7 @@ docker compose up
 
 初回ビルドではROS 2 Jazzy環境、公式SLAMTECドライバ、RViz 2を取得して
 ビルドします。起動後、モーターが回り、RVizに緑色の点群が表示されます。
-RVizのFixed Frameは `laser`、表示トピックは `/scan/points` に設定済みです。
+RVizのFixed Frameは `laser_link`、表示トピックは `/scan/points` に設定済みです。
 
 停止は `Ctrl+C`、バックグラウンド起動と停止は次のとおりです。
 
@@ -140,7 +140,7 @@ export ROS_DOMAIN_ID=0
 rviz2
 ```
 
-RVizでFixed Frameを `laser` にし、PointCloud2表示を追加してトピックを
+RVizでFixed Frameを `laser_link` にし、PointCloud2表示を追加してトピックを
 `/scan/points`、Reliabilityを `Best Effort` にします。
 
 ## ポートや起動パラメータを一時的に変更する
@@ -155,6 +155,22 @@ A1M8の標準設定は115200 baud、`Standard` scan modeです。変更が必要
 リポジトリルートの `ros2_ws/src/rplidar_bringup/launch/a1_points.launch.py` の
 パラメータを編集し、
 `docker compose build` をやり直します。
+
+### `/scan` のフレーム名
+
+既定は `laser_link` です。`lekiwi_description` が定義するリンク名に合わせてあり、
+LeKiwi ベースと同時に起動したとき（[`../lekiwi_bringup/`](../lekiwi_bringup/)）に
+`/scan` が `base_link → laser_link` の TF へ繋がります。ここがずれていると
+点群は表示できても SLAM や Nav2 の costmap が一切埋まりません。
+
+sllidar_ros2 単体の既定値（`laser`）に戻す場合は launch 引数で上書きします。
+
+```bash
+docker compose run --rm rplidar \
+  ros2 launch rplidar_bringup a1_points.launch.py frame_id:=laser
+```
+
+RViz の Fixed Frame も合わせて変更してください。
 
 ## トラブルシュート
 
@@ -210,7 +226,7 @@ RVizをホスト側で動かします。
 ### 点群が見えない
 
 `/scan` と `/scan/points` の周波数を上記コマンドで確認します。RVizでは
-Fixed Frame=`laser`、Topic=`/scan/points`、Reliability=`Best Effort` を確認し、
+Fixed Frame=`laser_link`、Topic=`/scan/points`、Reliability=`Best Effort` を確認し、
 TopDownOrthoビューでズームを調整します。LiDARの最小測距より近い物体や、反射しにくい
 黒色・透明・鏡面の対象は欠測することがあります。
 
