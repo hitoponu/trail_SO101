@@ -293,6 +293,21 @@ global_costmap:
       robot_radius: 0.17
       resolution: 0.05
       track_unknown_space: true
+      # ★ 固定サイズのローリングウィンドウにしている。既定 (rolling_window: false)
+      #   では global_costmap のサイズが static_layer 経由で SLAM の地図に追従して
+      #   伸縮するため、地図が広がった瞬間に planner_server と costmap の境界認識が
+      #   食い違い、NavFn が
+      #     [ERROR] worldToMap failed: mx,my: 160,9, size_x,size_y: 152,121
+      #   を大量に吐く (地図の外側のセルを引こうとする)。機能的には無害で経路も
+      #   出るが、ERROR レベルで秒あたり数百行出るので本物のエラーが埋まる。
+      #
+      #   サイズを固定すれば伸縮そのものが起きないので原因が消える。
+      #   ★ 代償: 大域計画がロボット周囲 20m 四方に限られる。この機体は有線
+      #     テザーで屋内運用なので実害はないが、広い場所で使うなら width/height を
+      #     広げるか、rolling_window: false に戻して Smac Planner へ替えること。
+      rolling_window: true
+      width: 20
+      height: 20
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
