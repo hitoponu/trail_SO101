@@ -105,6 +105,15 @@ def generate_launch_description():
             parameters=[base_params, {"port": port}],
         ),
 
+        # /scan を -60°〜+60° (右車輪〜左車輪の前方アーク) にフィルタリングして
+        # /scan_filtered として配信する。
+        Node(
+            package="lekiwi_base_bringup",
+            executable="scan_filter",
+            name="scan_angular_filter",
+            output="screen",
+        ),
+
         # nav.launch.py と同じ: frame_id は laser_link 固定
         Node(
             package="sllidar_ros2",

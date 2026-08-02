@@ -65,7 +65,7 @@
     <xacro:property name="cad_yaw" value="${-pi/2}"/>
 
     <!-- ★ TBD: 実測待ち。RViz でマゼンタ表示されるので未確定と分かる ★ -->
-    <xacro:property name="laser_xyz_TBD" value="0 0 0.09"/>
+    <xacro:property name="laser_xyz_TBD" value="0.10 0 0.03"/>
     <xacro:property name="laser_rpy_TBD" value="0 0 0"/>
     <!-- カメラマウントは CAD 由来 (CAD (0.02, 0.1, 0) → base_link (0.1, -0.02, 0))。
          光学フレームのオフセットは未実測。 -->

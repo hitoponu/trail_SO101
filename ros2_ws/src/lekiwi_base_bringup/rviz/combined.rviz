@@ -121,7 +121,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz_default_plugins/TopDownOrtho
+      Class: rviz_default_plugins/Orbit
       Angle: 0
       Name: Current View
       Scale: 50

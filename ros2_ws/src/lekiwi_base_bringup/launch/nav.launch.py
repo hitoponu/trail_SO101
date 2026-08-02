@@ -123,6 +123,17 @@ def generate_launch_description():
             parameters=[base_params, {"port": port}],
         ),
 
+        # /scan を -60°〜+60° (右車輪〜左車輪の前方アーク) にフィルタリングして
+        # /scan_filtered として配信する。コストマップ・slam_toolbox・collision_monitor
+        # がこちらを購読する。後方車輪やボディが /scan に映ると地図に幻の壁が焼き付く
+        # ため、SLAM も含めてフィルタ済みスキャンを使う。
+        Node(
+            package="lekiwi_base_bringup",
+            executable="scan_filter",
+            name="scan_angular_filter",
+            output="screen",
+        ),
+
         # RPLIDAR A1 を直接起動する (start_lidar:=true の場合のみ)。
         # sllidar_ros2 パッケージに直接依存し、rplidar_bringup には依存しない。
         # これにより Docker イメージに rplidar_bringup が入っていなくても
