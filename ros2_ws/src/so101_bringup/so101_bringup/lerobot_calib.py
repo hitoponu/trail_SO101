@@ -306,6 +306,39 @@ def convert(
     return joints, errors, notes
 
 
+def dump_xacro(calib: dict, deltas: dict[str, int], source) -> str:
+    """feetech_ros2_driver **v0.2.2** 用の offset を xacro プロパティとして出力する。
+
+    v0.2.2 は per-joint の ``offset`` で中心値を扱う（GitHub main の
+    ``kStsMidpoint`` 固定とも ``homing_offset`` とも別物）::
+
+        read : q    = (Present - offset) * 2π/4096
+        write: tick = q * 4096/2π + offset
+
+    したがって **offset = URDF ゼロ姿勢における Present の tick 値** であり、
+    ``2048 + Δ`` に等しい。EEPROM には一切書かない。
+    """
+    lines = [
+        '<?xml version="1.0" ?>',
+        "<!--",
+        "  so101_calib が生成したファイル (feetech_ros2_driver v0.2.2 用の offset)。",
+        f"    出典: {source}",
+        "  offset = URDF ゼロ姿勢における Present の tick 値 (= 2048 + Δ)。",
+        "  EEPROM には書き込まない。純粋なソフト側の補正値。",
+        "-->",
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">',
+    ]
+    for name in LEROBOT_TO_ROS:
+        offset = STS_MIDPOINT + deltas.get(name, 0)
+        delta = offset - STS_MIDPOINT
+        lines.append(
+            f'  <xacro:property name="so101_offset_{name}"'
+            f' value="{offset}"/>  <!-- Δ={delta:+d} -->'
+        )
+    lines.append("</robot>")
+    return "\n".join(lines) + "\n"
+
+
 def dump_yaml(joints: dict, source: Path, deltas: dict[str, int]) -> str:
     lines = [
         "# so101_calib が生成したファイル (Phase 2: ゼロ点を実測して明示的に書いた状態)。",
@@ -369,6 +402,12 @@ def main() -> None:
         " so101_probe --scan で q_ros を必ず確認すること",
     )
     parser.add_argument(
+        "--emit-xacro",
+        action="store_true",
+        help="feetech_ros2_driver v0.2.2 用の offset を xacro 形式で出力する"
+        " (config/so101_offsets.xacro へリダイレクトする)",
+    )
+    parser.add_argument(
         "--emit-ranges",
         action="store_true",
         help="range_min/range_max も書き出す (既定では homing_offset のみ)",
@@ -418,7 +457,10 @@ def main() -> None:
         raise SystemExit(1)
 
     source = args.json if args.json else Path(f"servo EEPROM ({args.port})")
-    text = dump_yaml(joints, source, deltas)
+    if args.emit_xacro:
+        text = dump_xacro(calib, deltas, source)
+    else:
+        text = dump_yaml(joints, source, deltas)
     if args.output:
         args.output.write_text(text)
         print(f"書き出しました: {args.output}", file=sys.stderr)

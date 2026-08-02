@@ -75,6 +75,19 @@ RUN . /opt/ros/jazzy/setup.sh \
 
 # ビルド時スモークテスト。
 # 実機に通電してから壊れに気付くのを避けるため、ここで落とす。
+# ★ driver のバージョンを固定検査する。
+#   apt の v0.2.2 と GitHub main はパラメータの意味がまったく違う:
+#     v0.2.2 … per-joint の `offset` が中心値。PID は `p_cofficient`(e抜け)。
+#              joint_config_file / homing_offset / range_* は無い
+#     main   … `offset` は非推奨。中心値は kStsMidpoint 固定。
+#              joint_config_file と homing_offset がある
+#   control/so101_follower.ros2_control.xacro は **v0.2.2 前提**で書いてある。
+#   バージョンが変わったら xacro も直す必要があるので、ここで気付けるようにする。
+RUN test "$(dpkg-query -W -f='${Version}' ros-jazzy-feetech-ros2-driver | cut -d- -f1)" = "0.2.2" \
+    || (echo "!! feetech_ros2_driver のバージョンが 0.2.2 ではない。" \
+        && echo "!! so101_follower.ros2_control.xacro は v0.2.2 前提 (offset / p_cofficient)。" \
+        && echo "!! 上流の変更点を確認してから xacro を更新すること。" && exit 1)
+
 RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
     && ros2 pkg prefix feetech_ros2_driver > /dev/null \
     && D="$(ros2 pkg prefix so_arm101_description)/share/so_arm101_description" \
@@ -89,14 +102,14 @@ RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
          ros2_control_file:="$B/control/so101_follower.ros2_control.xacro" > /tmp/real.urdf \
     && check_urdf /tmp/real.urdf > /dev/null \
     && grep -q 'feetech_ros2_driver/FeetechHardwareInterface' /tmp/real.urdf \
-    && grep -q 'joint_config_file' /tmp/real.urdf \
-    && ! grep -q 'p_cofficient' /tmp/real.urdf \
-    && ! grep -q 'name="offset"' /tmp/real.urdf \
+    && grep -q 'name="offset"' /tmp/real.urdf \
+    && grep -q 'p_cofficient' /tmp/real.urdf \
+    && ! grep -q 'joint_config_file' /tmp/real.urdf \
     && python3 -c "import scservo_sdk, yaml" \
     && python3 -c "from so101_bringup import lerobot_calib, sts_probe" \
-    && python3 -c "import yaml,sys; d=yaml.safe_load(open('$B/config/so101_joints.yaml')); \
-                   ids=sorted(v['id'] for v in d['joints'].values()); \
-                   sys.exit(0 if ids==[1,2,3,4,5,6] else 1)"
+    && python3 -c "import re,sys; t=open('/tmp/real.urdf').read(); \
+                   o=[int(m) for m in re.findall(r'<param name=\"offset\">(-?[0-9]+)</param>', t)]; \
+                   sys.exit(0 if len(o)==6 and all(0<=v<=4095 for v in o) else 1)"
 
 COPY docker/so101_ros2/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

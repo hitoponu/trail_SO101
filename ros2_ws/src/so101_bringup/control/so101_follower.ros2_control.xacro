@@ -2,38 +2,40 @@
 <!--
   SO-101 follower 用の ros2_control 記述。
 
-  ■ なぜ上流のファイルを使わないのか
+  ★★★ 対象は apt の feetech_ros2_driver **v0.2.2**。GitHub の main とは別物。★★★
 
-  上流 (ros-physical-ai/ros2_so_arm) の
-  so_arm101_description/control/so_arm101.ros2_control.xacro には、
-  feetech_ros2_driver v0.2.2 のソースと突き合わせて確認した実バグが3つある:
+  ■ v0.2.2 と main の違い（実機で判明。ここを取り違えると全関節が π rad ずれる）
 
-    1. <param name="offset">2048</param> を設定しているが、driver 側で offset は
-       **非推奨で無視される**。起動時に警告が6回出るだけで何も反映されない。
-    2. PID パラメータの綴りが "p_cofficient" (e が抜けている)。driver は
-       "p_coefficient" を探すので、**PID 値は一切書き込まれない**。
-    3. joint_config_file のハードウェアパラメータが無いため、
-       **較正 YAML を渡す口が無い**。
+  機能                  apt v0.2.2                    GitHub main
+  ....................  ............................  ............................
+  中心値の扱い          per-joint の `offset`         `kStsMidpoint`(2048) 固定
+  `offset`              必須。無いと 0 になる         非推奨・無視される
+  PID の綴り            `p_cofficient`（e 抜け）      `p_coefficient`
+  `joint_config_file`   無い                          ある
+  `homing_offset`       無い                          ある（EEPROM へ書く）
+  `range_min/max`       無い                          ある（EEPROM へ書く）
 
-  幸い上流の親 xacro (so_arm101.urdf.xacro) には ros2_control_file:= という
-  差し替え用の引数があるので、URDF 本体はフォークせずこのファイルだけを渡す。
-  マクロ名と引数 (prefix ros2_control_hardware_type usb_port) は上流と同一に保つこと。
+  v0.2.2 の read/write は
+      read : q   = to_radians(Present - offset)
+      write: tick = from_radians(q) + offset
+  なので **`offset` = URDF ゼロ姿勢における Present の tick 値**。
 
-  ■ 設計方針
+  `offset` を書かないと 0 になり、`q = Present * 2π/4096` すなわち
+  全関節が **+π rad** ずれる。RViz が不可能な姿勢になり、
+  `joint_limiter_interface` が limit 超過で例外を投げてコントローラが落ちる。
 
-  関節ごとに書くのは **id だけ**。PID・加速度・保護電流・較正値はすべて
-  config/so101_joints.yaml 側に置く。driver は YAML を **joint 名ではなく id**
-  で突合せ、YAML が URDF より優先される。設定が二箇所に散らないようにする。
+  ■ v0.2.2 では EEPROM を書き換えない
+  `offset` は純粋なソフト側の値で、サーボの EEPROM には触らない。
+  較正値（homing_offset / range）は lerobot が書いたものがそのまま残り、
+  この構成からは変更されない。**壊す心配が無いのは利点。**
 
-  mujoco / gazebo の分岐は落としてある (スコープ外。かつ mujoco 分岐は
-  MuJoCo ランタイムを同梱していないのに mjcf/scene.xml を参照してしまう)。
+  ■ offset の値
+  `config/so101_offsets.xacro` に分離してある。機体ごとの較正値なのでそちら参照。
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <xacro:arg
-    name="joint_config_file"
-    default="$(find so101_bringup)/config/so101_joints.yaml"
-  />
+  <!-- 機体ごとの offset（URDF ゼロにおける Present tick）-->
+  <xacro:include filename="$(find so101_bringup)/config/so101_offsets.xacro"/>
 
   <xacro:macro
     name="ros2_control"
@@ -48,57 +50,33 @@
         <xacro:if value="${ros2_control_hardware_type == 'real'}">
           <plugin>feetech_ros2_driver/FeetechHardwareInterface</plugin>
           <param name="usb_port">${usb_port}</param>
-          <!-- ★ 上流に無い。較正値と調整値はすべてこの YAML から入る。 -->
-          <param name="joint_config_file">$(arg joint_config_file)</param>
         </xacro:if>
       </hardware>
 
       <!--
-        関節の並びは URDF (so_arm101_macro.xacro) と、
-        config/ros2_controllers.yaml の joints リストに一致させること。
-        id 1-6 は lerobot の SO-101 の割り当てと同じ。
+        PID の綴りは v0.2.2 に合わせて **わざと "cofficient"**（e 抜け）にしてある。
+        正しい綴りに直すと v0.2.2 は読まず、PID が一切設定されない。
+        driver を main 系へ上げるときは同時に直すこと。
       -->
-      <joint name="${prefix}shoulder_pan_joint">
-        <param name="id">1</param>
-        <command_interface name="position" />
-        <state_interface name="position" />
-        <state_interface name="velocity" />
-      </joint>
+      <xacro:macro name="sts_joint" params="name id offset p:=16 i:=0 d:=32">
+        <joint name="${prefix}${name}">
+          <param name="id">${id}</param>
+          <param name="offset">${offset}</param>
+          <param name="p_cofficient">${p}</param>
+          <param name="i_cofficient">${i}</param>
+          <param name="d_cofficient">${d}</param>
+          <command_interface name="position"/>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+      </xacro:macro>
 
-      <joint name="${prefix}shoulder_lift_joint">
-        <param name="id">2</param>
-        <command_interface name="position" />
-        <state_interface name="position" />
-        <state_interface name="velocity" />
-      </joint>
-
-      <joint name="${prefix}elbow_flex_joint">
-        <param name="id">3</param>
-        <command_interface name="position" />
-        <state_interface name="position" />
-        <state_interface name="velocity" />
-      </joint>
-
-      <joint name="${prefix}wrist_flex_joint">
-        <param name="id">4</param>
-        <command_interface name="position" />
-        <state_interface name="position" />
-        <state_interface name="velocity" />
-      </joint>
-
-      <joint name="${prefix}wrist_roll_joint">
-        <param name="id">5</param>
-        <command_interface name="position" />
-        <state_interface name="position" />
-        <state_interface name="velocity" />
-      </joint>
-
-      <joint name="${prefix}gripper_joint">
-        <param name="id">6</param>
-        <command_interface name="position" />
-        <state_interface name="position" />
-        <state_interface name="velocity" />
-      </joint>
+      <xacro:sts_joint name="shoulder_pan_joint"  id="1" offset="${so101_offset_shoulder_pan}"/>
+      <xacro:sts_joint name="shoulder_lift_joint" id="2" offset="${so101_offset_shoulder_lift}"/>
+      <xacro:sts_joint name="elbow_flex_joint"    id="3" offset="${so101_offset_elbow_flex}"/>
+      <xacro:sts_joint name="wrist_flex_joint"    id="4" offset="${so101_offset_wrist_flex}"/>
+      <xacro:sts_joint name="wrist_roll_joint"    id="5" offset="${so101_offset_wrist_roll}"/>
+      <xacro:sts_joint name="gripper_joint"       id="6" offset="${so101_offset_gripper}"/>
     </ros2_control>
   </xacro:macro>
 </robot>

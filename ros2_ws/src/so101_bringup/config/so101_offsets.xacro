@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<!--
+  この機体の offset（feetech_ros2_driver v0.2.2 用）。
+
+  offset = URDF ゼロ姿勢における Present の tick 値。
+      read : q    = (Present − offset) × 2π/4096
+      write: tick = q × 4096/2π + offset
+
+  つまり offset を正しく入れれば、その tick のとき RViz で全関節 0 になる。
+  2048 が「補正なし」に相当し、そこからのずれが Δ。
+  EEPROM には一切書き込まない。純粋なソフト側の補正値。
+
+  求め方と再生成コマンドは docker/so101_ros2/README.md の「6. ゼロ点」を参照。
+  lerobot が記録した可動域から計算できるので目測は不要。
+  so101_calib に emit_xacro オプションを付けるとこのファイルを生成する。
+
+  現在の値の出自: 2026‑08‑02、実機の EEPROM から読んだ可動域より算出。
+
+    関節            range        offset   Δ(=offset−2048)
+    shoulder_pan     695..3409     2052        +4
+    shoulder_lift    802..3154     1978       −70
+    elbow_flex       670..3051     1916      −132
+    wrist_flex      1014..3350     2182      +134
+    wrist_roll         0..4095     2048        +0    ★暫定
+    gripper         1961..3399     1961       −87    ★要確認
+
+  ★ wrist_roll: lerobot がフルターン扱いで可動域を記録しないため計算できない。
+    2048（無補正）を暫定で置いている。RViz と実物を見比べて手で詰めること。
+  ★ gripper: 「閉」が range_min(1961) 側であることを未確認。
+    閉じ切って so101_probe の Present を読み、range_max(3399) 側だったら
+    そちらへ差し替えること。
+
+  注意: このファイルは XML コメント内に連続ハイフンを書けない。
+  コマンド例を貼るとパースに失敗するので README 側に置くこと。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:property name="so101_offset_shoulder_pan"  value="2052"/>
+  <xacro:property name="so101_offset_shoulder_lift" value="1978"/>
+  <xacro:property name="so101_offset_elbow_flex"    value="1916"/>
+  <xacro:property name="so101_offset_wrist_flex"    value="2182"/>
+  <xacro:property name="so101_offset_wrist_roll"    value="2048"/>
+  <xacro:property name="so101_offset_gripper"       value="1961"/>
+</robot>
