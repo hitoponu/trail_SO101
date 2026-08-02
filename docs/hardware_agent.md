@@ -166,6 +166,10 @@ git push
   `offset` 未指定を 0 として扱い、`/joint_states` は `Present * 2π/4096` 相当の値を配信した。
   scan の `q_ros` より全関節で約 `π rad` ずれ、shoulder_pan と gripper の limit 超過で
   trajectory / gripper controller が停止した。RViz も実物と一致しなかった
+- **検証済み (2026-08-02)**: apt v0.2.2 用の per-joint `offset` 修正後は約 `π rad` のずれと
+  limit エラーが解消し、controller 4つは active/inactive になった。ただし scan の `q_ros` と
+  `/joint_states` には shoulder_lift / elbow_flex / wrist_flex / gripper で 0.104〜0.207 rad の差があり、
+  RViz は人間の目視で実物と一致し、正しく動くことを確認した
 - **未検証**: グリッパの「閉」が `range_min`(1961) 側か `range_max`(3399) 側か
 - **検証済み**: モック環境でのコントローラ4種、`FollowJointTrajectory`、
   `ParallelGripperCommand`、TF、`enforce_command_limits`
