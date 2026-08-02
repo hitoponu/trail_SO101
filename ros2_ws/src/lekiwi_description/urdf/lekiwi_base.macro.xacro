@@ -218,8 +218,13 @@
 
     <!--
       ★ laser_link の位置は未実測。RPLIDAR A1 を載せたら実測して差し替えること。
-        sllidar_ros2 の frame_id は既定で "laser" なので、
-        rplidar_bringup と併用する場合はここの名前と合わせる。
+
+        フレーム名の整合は rplidar_bringup 側で取ってある。sllidar_ros2 の
+        既定の frame_id は "laser" だが、a1_points.launch.py が
+        frame_id:=laser_link を既定にしてこのリンク名へ合わせている。
+        **ここのリンク名を変えるなら launch の既定値も変えること。**
+        (名前がずれていると /scan が TF ツリーへ繋がらず、SLAM/Nav2 の
+         costmap が一切埋まらない)
     -->
     <joint name="${prefix}laser_joint" type="fixed">
       <origin xyz="${laser_xyz_TBD}" rpy="${laser_rpy_TBD}"/>
