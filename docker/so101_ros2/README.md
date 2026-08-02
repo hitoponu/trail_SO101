@@ -505,9 +505,29 @@ docker compose exec so101-follower /entrypoint.sh ros2 topic hz /joint_states   
 **まだ何も指令しないでください。** RViz の表示と実物を**2方向から**見比べます。
 すべての関節が数度以内で一致していれば次へ進めます。
 
+> **これは静止状態での見比べです。**「アームを手で動かして RViz が追従するか」を
+> 見るテストではありません。**この時点でトルクは入っているのでアームは手で
+> 動かせません**（ドライバが `on_init` でトルクを入れるため）。
+> 無理に動かすとサーボが抵抗します。
+> 手で動かして確認したい場合は、いったん止めて 6.1 の
+> `so101_probe --torque-off --watch` を使ってください。
+
 ずれている関節があれば、**何度ずれているかを目測して 6.4 の補正**を回します
 （`Δ[tick] = ずれ角[°] × 11.38`）。`wrist_roll` はここでしか合わせられません。
 2〜3 周で収束します。
+
+ずれ量を数値で出すには、RViz を見ずに `/joint_states` を読むほうが正確です。
+
+```bash
+docker compose exec so101-follower /entrypoint.sh \
+  ros2 topic echo /joint_states --once --field position
+docker compose exec so101-follower /entrypoint.sh \
+  ros2 topic echo /joint_states --once --field name
+```
+
+たとえばアームを**URDF ゼロ姿勢**（RViz で全関節 0 のときの形）に近づけて置き、
+そのとき `position` が 0 から離れている分がそのままずれです
+（単位は rad。`Δ[tick] = ずれ[rad] × 651.9`）。
 
 > `/joint_states` の `velocity` は信用できません（後述の既知バグ）。
 > `position` だけを見てください。
