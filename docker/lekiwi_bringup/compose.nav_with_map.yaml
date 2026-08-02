@@ -1,30 +1,32 @@
-# 実機で SLAM + Nav2 を動かすための compose。
+# 保存済みの地図で AMCL 自己位置推定 + Nav2 ナビゲーションを動かす compose。
 #
-#   docker compose -f compose.nav.yaml build
-#   docker compose -f compose.nav.yaml up
+#   # 初回: 地図ディレクトリを用意
+#   mkdir -p ~/maps
 #
-# ■ compose.yaml との違い
-#   lekiwi-base が base.launch.py → nav.launch.py に切り替わる。
-#   nav.launch.py は start_lidar:=false で起動するので、
-#   sllidar_node は rplidar コンテナ (下に定義) が担当する。
+#   # ビルドは compose.nav.yaml と共通イメージなので build は不要 (済んでいれば)
+#   docker compose -f compose.nav_with_map.yaml up
 #
-# ■ 起動前チェック
-#   * base.yaml の wheel_direction_signs / wheel_angle_offset_deg が実機合わせ済み
-#   * URDF の laser_link 位置が実測値に更新済み (TBD 仮値のままだと地図が歪む)
-#   * .env の LEKIWI_DEVICE / RPLIDAR_DEVICE が実機に合っている
+# ■ compose.nav.yaml との違い
+#   * nav.launch.py (SLAM) → nav_with_map.launch.py (AMCL) に切り替わる
+#   * map_file 引数でコンテナ内の /maps/<MAP_NAME>.yaml を指定する
+#   * /maps ディレクトリはホストの MAP_DIR (既定: ~/maps) をマウント
 #
-# ■ 地図の保存 (別ターミナルから)
-#   docker exec lekiwi-nav \
-#     ros2 run nav2_map_server map_saver_cli -f /tmp/my_room
-#   その後 docker cp lekiwi-nav:/tmp/my_room.* ~/map/
+# ■ 前提
+#   * compose.nav.yaml で地図を作成・保存済みであること
+#     (コンテナ内から: ros2 run nav2_map_server map_saver_cli -f /maps/my_room)
+#   * .env の MAP_NAME に保存したファイル名 (拡張子なし) を設定すること
+#
+# ■ 起動後の操作
+#   1. RViz の "2D Pose Estimate" で初期自己位置を与える
+#   2. RViz の "Nav2 Goal" でゴールを指定するとナビゲーションが始まる
 
 services:
-  lekiwi-nav:
+  lekiwi-nav-map:
     build:
       context: ../..
       dockerfile: docker/lekiwi_base_ros2/Dockerfile
     image: local/lekiwi-base-ros2:jazzy
-    container_name: lekiwi-nav
+    container_name: lekiwi-nav-map
     init: true
     network_mode: host
     ipc: host
@@ -42,21 +44,20 @@ services:
       - ${DIALOUT_GID:-20}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      # 地図の永続化。コンテナ内で保存した地図をホストから参照できる。
-      # ホスト側ディレクトリは MAP_DIR で変更可能 (既定: ~/maps)。
-      - ${MAP_DIR:-$HOME/maps}:/maps
+      # ホストの地図ディレクトリをコンテナの /maps に読み取り専用でマウント
+      - ${MAP_DIR:-$HOME/maps}:/maps:ro
     command:
       - ros2
       - launch
       - lekiwi_base_bringup
-      - nav.launch.py
+      - nav_with_map.launch.py
       - port:=${LEKIWI_DEVICE:-/dev/ttyACM0}
       # sllidar_node は rplidar コンテナが担当する
       - start_lidar:=false
       - start_rviz:=${LEKIWI_START_RVIZ:-true}
-    # ★ モータドライバが勝手に復帰してホイールが回り出すのは危険
+      # MAP_NAME は拡張子なしのファイル名 (.env で設定)
+      - map_file:=/maps/${MAP_NAME:-my_room}.yaml
     restart: "no"
-    # ★ rclpy がネイティブに扱うのは SIGINT
     stop_signal: SIGINT
     stop_grace_period: 20s
     stdin_open: true
