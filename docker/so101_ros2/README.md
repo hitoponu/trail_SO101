@@ -195,6 +195,30 @@ docker compose exec so101-follower /entrypoint.sh \
 # -> shoulder_pan が 0.3 になっていれば同じことが確認できる
 ```
 
+### エンドエフェクタをキーボードで動かす
+
+コンテナ内で専用のCartesian Jogを明示的に起動します。通常のbringupでは
+自動起動しません。
+
+```bash
+ros2 launch so101_bringup keyboard_teleop.launch.py
+```
+
+| キー | `base_link` 基準の動作 |
+| --- | --- |
+| `W` / `S` | +X / −X |
+| `A` / `D` | +Y / −Y |
+| `R` / `F` | +Z / −Z |
+| `Q` / `Esc` | 終了 |
+
+キーを押している間だけ動き、離すと現在位置を保持します。同時押しによる斜め移動にも
+対応し、合成速度は既定の `0.02 m/s` を超えません。速度などはlaunch引数で変更できます。
+
+```bash
+ros2 launch so101_bringup keyboard_teleop.launch.py \
+  linear_speed:=0.01 max_joint_velocity:=0.3
+```
+
 **★ このときの RViz のゼロ姿勢（全関節 0）を写真に撮っておいてください。**
 手順6でこれを基準に使います。
 
