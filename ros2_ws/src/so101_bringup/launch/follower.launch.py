@@ -1,15 +1,33 @@
 """SO-101 follower アームの起動。
 
-    # モックでのドライラン (シリアルを一切開かない。既定)
+**このファイルが起動の主体。** `docker compose up` はコンテナを待機させるだけで、
+ROS ノードも RViz もトルクも扱わない。
+
+    # モックでのドライラン（シリアルを一切開かない。既定）
     ros2 launch so101_bringup follower.launch.py
 
     # 実機
-    ros2 launch so101_bringup follower.launch.py \
+    ros2 launch so101_bringup follower.launch.py \\
         ros2_control_hardware_type:=real usb_port:=/dev/so101_follower
 
 ★ 既定が mock_components なのは意図的。引数なしでは実機に触れない。
 
-キーボード/GUI からの操作は含めない。JTC 越しに動かすには別ターミナルから:
+■ torque 引数（既定 true）
+
+driver v0.2.2 は **トルクを入れない**（`set_torque(true)` を一度も呼ばない）。
+トルクはサーボの電源投入時の状態のままになるので、
+`so101_probe --torque-off` の後に起動すると脱力したまま指令だけが送られる
+（「動かない」ように見える）。
+
+そこでこの launch は `ros2_control` を起動する**前に**トルクを入れる。
+同じシリアルポートを二重に開かないよう、前処理の終了を待ってから制御を上げる。
+
+手で動かしながら TF を見たい場合などは `torque:=false`。
+
+    ros2 launch so101_bringup follower.launch.py \\
+        ros2_control_hardware_type:=real torque:=false
+
+■ 関節を動かす
 
     ros2 run rqt_joint_trajectory_controller rqt_joint_trajectory_controller
 """
@@ -19,9 +37,9 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, RegisterEventHandler
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import Command, LaunchConfiguration
+from launch.substitutions import Command, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -29,19 +47,27 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     hardware_type = LaunchConfiguration("ros2_control_hardware_type")
     usb_port = LaunchConfiguration("usb_port")
-    joint_config_file = LaunchConfiguration("joint_config_file")
     controllers_file = LaunchConfiguration("controllers_file")
     start_rviz = LaunchConfiguration("start_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
+    torque = LaunchConfiguration("torque")
 
     bringup_share = Path(get_package_share_directory("so101_bringup"))
     description_share = Path(get_package_share_directory("so_arm101_description"))
 
     xacro_file = description_share / "urdf" / "so_arm101.urdf.xacro"
-    # ★ 上流の ros2_control xacro は使わない (offset が無視される / p_cofficient の
-    #   綴り間違い / joint_config_file が無い の3つのバグがある)。
+    # ★ 上流の ros2_control xacro は使わない。
+    #   上流のものは GitHub main 系の書き方 (offset は非推奨、p_coefficient) だが、
+    #   apt で入る driver は v0.2.2 で意味が違う (offset が必須、p_cofficient)。
     #   親 xacro の ros2_control_file 引数で自前のものへ差し替える。
+    #   詳細は control/so101_follower.ros2_control.xacro の冒頭コメント。
     ros2_control_file = bringup_share / "control" / "so101_follower.ros2_control.xacro"
+
+    # 実機かつ torque:=true のときだけトルクを入れる。
+    # mock ではシリアルを開かないので前処理は不要。
+    needs_torque = PythonExpression([
+        "'", torque, "' == 'true' and '", hardware_type, "' == 'real'",
+    ])
 
     # ParameterValue(..., value_type=str) は Jazzy では必須。
     # 無いと Command の出力が文字列として扱われず robot_state_publisher が落ちる。
@@ -51,19 +77,22 @@ def generate_launch_description():
             " ros2_control_hardware_type:=", hardware_type,
             " usb_port:=", usb_port,
             " ros2_control_file:=", str(ros2_control_file),
-            " joint_config_file:=", joint_config_file,
         ]),
         value_type=str,
     )
 
-    control_node = Node(
-        package="controller_manager",
-        executable="ros2_control_node",
-        output="screen",
-        parameters=[controllers_file],
-        # Jazzy の controller_manager はこの remap でロボット記述を受け取る
-        remappings=[("~/robot_description", "/robot_description")],
-    )
+    def make_control_node(condition=None):
+        # 同一の Node インスタンスを LaunchDescription の2箇所へ入れられないので、
+        # トルク前処理の有無それぞれに1つずつ生成する。
+        return Node(
+            package="controller_manager",
+            executable="ros2_control_node",
+            output="screen",
+            parameters=[controllers_file],
+            # Jazzy の controller_manager はこの remap でロボット記述を受け取る
+            remappings=[("~/robot_description", "/robot_description")],
+            condition=condition,
+        )
 
     def spawner(name, *extra):
         return Node(
@@ -82,6 +111,17 @@ def generate_launch_description():
     # 有効化すると補間なしで指令が飛ぶ (driver の速度は 2400 ≒ 210 deg/s 固定)。
     fwd = spawner("forward_position_controller", "--inactive")
 
+    # ★ ros2_control より **先に** 実行し、終了を待ってから制御を上げる。
+    #   同じシリアルポートを二重に開かないため。
+    torque_on = Node(
+        package="so101_bringup",
+        executable="so101_probe",
+        name="so101_torque_on",
+        arguments=["--port", usb_port, "--torque-on"],
+        condition=IfCondition(needs_torque),
+        output="screen",
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             "ros2_control_hardware_type",
@@ -90,8 +130,9 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("usb_port", default_value="/dev/so101_follower"),
         DeclareLaunchArgument(
-            "joint_config_file",
-            default_value=str(bringup_share / "config" / "so101_joints.yaml"),
+            "torque",
+            default_value="true",
+            description="起動前にトルクを入れるか。driver v0.2.2 は自分では入れない",
         ),
         DeclareLaunchArgument(
             "controllers_file",
@@ -112,7 +153,15 @@ def generate_launch_description():
             parameters=[{"robot_description": robot_description}],
         ),
 
-        control_node,
+        # トルクを入れる場合: 前処理の終了を待って ros2_control を起動する
+        torque_on,
+        RegisterEventHandler(
+            OnProcessExit(target_action=torque_on, on_exit=[make_control_node()]),
+            condition=IfCondition(needs_torque),
+        ),
+        # 入れない場合（mock、または torque:=false）: すぐ起動する
+        make_control_node(condition=UnlessCondition(needs_torque)),
+
         jsb,
         RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[jtc])),
         RegisterEventHandler(OnProcessExit(target_action=jtc, on_exit=[grip])),

@@ -97,7 +97,7 @@ FULL_TURN_MOTORS = {"wrist_roll"}
 #: 他の関節とは計算方法が違う。
 GRIPPER = "gripper"
 
-#: 既定の調整値。so101_joints.yaml の Phase 1 と揃えてある。
+#: 既定の調整値。emit_yaml 経路 (main 系 driver 向け) でのみ使う。
 DEFAULT_TUNING = {
     "p_coefficient": 16,
     "i_coefficient": 0,

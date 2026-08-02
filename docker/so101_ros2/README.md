@@ -21,11 +21,16 @@
 - **`docker kill -s SIGKILL` ではトルクは切れません**（その場で凍結します）。
   「今すぐ動きを止めたいが落としたくない」ときはこちらです。ただしサーボは
   保持し続けるので発熱します。
-- **起動時に一瞬だけ脱力します。** ドライバが `on_init` で EEPROM を書くために
-  一度トルクを切るためです。**初回は手で支えてください。**
-- **ROS を起動する前に必ずアームの電源を入れ直してください。**
-  サーボの `Goal_Position` に前回セッションの値が残っていると、
-  トルクが入った瞬間にそこへ飛びます。
+- **ドライバはトルクを入れません。** driver v0.2.2 は `set_torque(true)` を
+  一度も呼ばず、**トルクはサーボの電源投入時の状態のまま**です
+  （`on_deactivate` で切るだけ）。したがって:
+  - `so101_probe --torque-off` の後に電源を入れ直さず起動すると、
+    **脱力したまま指令だけが送られます**（「動かない」に見える）。
+    `so101_probe --torque-on` で入れ直せます
+  - 起動時に脱力することはありません（それは上流 main 系の挙動です）
+- **ROS を起動する前にアームの電源を入れ直すことを推奨します。**
+  トルク状態が確実にリセットされ、サーボの `Goal_Position` に残った
+  前回セッションの値へ飛ぶ事故も防げます。
 - 半径 35cm 以内を空け、肘の下に発泡ブロックなどの受けを置いてください。
 - **アーム専用電源のスイッチが唯一の物理的な非常停止です。** 手の届く所に。
 - lerobot 側のプロセスを止めてください。同じポートを二重に開けません。
@@ -40,9 +45,20 @@
 | --- | --- | --- | --- |
 | 今の動作だけ止めたい | 実行中の `send_goal` を `Ctrl+C`（goal cancel） | ON | その場で保持。**最速のソフト停止** |
 | 制御を切り離したい | `ros2 control switch_controllers --deactivate joint_trajectory_controller` | ON | 最後の指令位置で保持 |
+| 動きを凍結したい | **`docker compose down`** | ON | **凍結**（下記参照） |
 | 動きを凍結したい | `docker kill -s SIGKILL so101-follower` | ON | 凍結（発熱注意） |
-| 通常終了 | `Ctrl+C` / `docker compose down` | **OFF** | **脱力して落ちる** |
+| 脱力させたい | **launch を `Ctrl+C`** | **OFF** | **脱力して落ちる** |
 | 完全停止 | アーム電源スイッチ OFF | **OFF** | **脱力して落ちる**。唯一の物理的非常停止 |
+
+> **★ `docker compose down` ではアームは落ちません（凍結します）。**
+> launch は `docker compose exec` で動いており **PID 1 の子ではない**ため、
+> コンテナ停止時に SIGINT が届きません（実測で確認）。
+> `on_deactivate` が走らないのでトルクが入ったままになります。
+>
+> **脱力させたいときは launch を動かしている端末で `Ctrl+C`** してください。
+> こちらは SIGINT が届き、`on_deactivate` がトルクを切ります（＝落ちます）。
+>
+> 停止前に低く畳んだ姿勢へ動かすべきなのは `Ctrl+C` の場合です。
 
 ## 前提
 
@@ -126,12 +142,25 @@ xhost +si:localuser:root
 
 ```bash
 docker compose build
-docker compose up
+docker compose up -d            # ← コンテナが待機するだけ。何も起きない
 ```
 
-**RViz はこの `docker compose up` で一緒に立ち上がります**（別コマンドは不要）。
-`compose.yaml` が launch に `start_rviz:=${START_RVIZ:-true}` を渡しているためです。
-不要なら `.env` の `START_RVIZ=false`、または `START_RVIZ=false docker compose up`。
+**`docker compose up` では ROS ノードも RViz もトルクも起動しません。**
+コンテナは `sleep infinity` で待機するだけです。
+起動の主体は `follower.launch.py` で、明示的に実行します。
+
+```bash
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 launch so101_bringup follower.launch.py
+```
+
+**RViz はこの launch が立ち上げます**（`start_rviz:=false` で抑止できます）。
+
+この形にしている理由:
+
+- **`up` しただけでは実機に触れない。** 実機を動かすのが明示的な操作になる
+- **launch を `Ctrl+C` で止めれば `on_deactivate` が走る**（コンテナは生きたまま）。
+  何度も起動し直すのにコンテナの作り直しが要らない
 
 > **macOS では RViz のウィンドウは出ません**（X サーバが無いため）。
 > ドライラン自体は動くので、下記のコマンドで**数値で確認**してください。
@@ -283,7 +312,9 @@ wrist_roll      Δ=[  +0.0    -3.8    +1.1] mm   ← 軸まわりの回転なの
 確かめるならモック環境で指令を出し、RViz で見ます（手順4がそのまま使えます）。
 
 ```bash
-docker compose up          # HARDWARE_TYPE=mock_components (既定)
+docker compose up -d
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 launch so101_bringup follower.launch.py       # 既定は mock_components
 ```
 
 別ターミナルから **1関節だけ +0.5 rad** にします。配列の位置を変えれば他の関節になります
@@ -418,7 +449,7 @@ gripper        Δ =  -790 tick ( -69.4°)
 
 1. 6.2 で生成した設定で手順7へ進んで起動する
 2. RViz と実物を見比べ、ずれている関節について「何度ずれているか」だけ目測する
-3. `Δ[tick] = ずれ角[°] × 11.38` を足して `so101_joints.yaml` を更新、再ビルド
+3. `Δ[tick] = ずれ角[°] × 11.38` を足して `so101_offsets.xacro` を更新、再起動
 4. 再起動して確認。必要なら繰り返す
 
 **絶対姿勢を作るのではなく「差」を読むだけ**なので、目測でも十分な精度が出ます。
@@ -428,98 +459,103 @@ gripper        Δ =  -790 tick ( -69.4°)
 
 ### 6.5 設定ファイルへ反映する
 
-`so101_calib` は **YAML を標準出力へ吐く**だけなので、リダイレクトでファイルにします。
-診断メッセージは標準エラーへ出るので、ファイルには混ざりません。
+`so101_calib` は **offset を xacro 形式で標準出力へ吐く**だけなので、
+リダイレクトでファイルにします。診断メッセージは標準エラーへ出るので混ざりません。
 
-このディレクトリ（`docker/so101_ros2`）から実行する場合:
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_calib \
-    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
-  > ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml
-
-docker compose build
-```
-
-**いきなり上書きせず、一度確認してからにするほうが安全です。**
+このディレクトリ（`docker/so101_ros2`）から:
 
 ```bash
 docker compose run --rm so101-follower \
   ros2 run so101_bringup so101_calib \
-    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
-  > /tmp/so101_joints.yaml
-
-diff -u ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml /tmp/so101_joints.yaml
-cp /tmp/so101_joints.yaml ../../ros2_ws/src/so101_bringup/config/so101_joints.yaml
-docker compose build
+    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
+  > ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro
 ```
 
-> `-o` オプションは**コンテナ内**のパスに書くのでホストからは見えません。
-> ホストのファイルにしたい場合は上記のリダイレクトを使ってください。
-
-出来上がるのはこういうファイルです（先頭のコメントに Δ の内訳が残ります）。
-
-```yaml
-# so101_calib が生成したファイル (Phase 2: ゼロ点を実測して明示的に書いた状態)。
-#   実測 Δ: {'shoulder_pan': 62, 'shoulder_lift': -11, 'elbow_flex': -120, ...}
-joints:
-  shoulder_pan:
-    id: 1
-    p_coefficient: 16
-    ...
-    homing_offset: 530
-    range_min: 812
-    range_max: 3533
-```
-
-Δ を手で与えたい／6.4 で補正した分を足したい場合は `--delta` を併用します。
-`--from-ranges` の結果を関節ごとに上書きできます。
+**いきなり上書きせず、一度確認するほうが安全です。**
 
 ```bash
-    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges \
-    --delta wrist_roll=-25,elbow_flex=-140
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_calib \
+    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
+  > /tmp/so101_offsets.xacro
+
+diff -u ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro /tmp/so101_offsets.xacro
+cp /tmp/so101_offsets.xacro ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro
 ```
 
-生成されたファイルは `homing_offset` が `±2047` を超えないこと、
-`range_*` が `0..4095` に収まることを自動で検査します（超えると却下されます。
-ドライバが `on_init` でクラッシュするためです）。
+出来上がるのはこういうファイルです。
 
-`docker compose build` を忘れると設定が反映されません
-（イメージ内の `install/` にコピーされるため）。
+```xml
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:property name="so101_offset_shoulder_pan" value="2052"/>  <!-- Δ=+4 -->
+  <xacro:property name="so101_offset_shoulder_lift" value="1978"/>  <!-- Δ=-70 -->
+  ...
+</robot>
+```
+
+反映のさせ方は使っているモードによります。
+
+| モード | 反映方法 |
+| --- | --- |
+| 開発用オーバーレイ（`-f compose.dev.yaml`） | **再起動だけ** |
+| 素の `compose.yaml` | `docker compose build` |
+
+`--delta` で関節ごとに上書きできます（`wrist_roll` はこれで与えます）。
+
+```bash
+    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
+    --delta wrist_roll=68
+```
+
+> **`offset` はサーボの EEPROM には書きません。** driver v0.2.2 の
+> `offset` はソフト側だけで完結する値で、`read/write` の変換に使われるだけです。
+> 較正値（`homing_offset` / `range_*`）は lerobot が書いたものが無傷で残ります。
+> **設定を間違えても壊れないのが、この方式の利点です。**
 
 ### 6.6 lerobot の較正 JSON は必須ではない
 
 **較正値の実体はサーボの EEPROM にあり、JSON はその控えにすぎません。**
 
-ドライバは `homing_offset` / `range_min` / `range_max` が設定に書かれている
-ときだけ該当レジスタを書きます（`configure_joints_` は各パラメータについて
-「キーが存在すれば書く」という実装）。既定の `so101_joints.yaml` は
-**Phase 1**（これらを書かない）状態なので、**JSON が手元に無くても動きます。**
-サーボに入っている較正値がそのまま使われます。初回の実機起動はこれで構いません。
-
-JSON が要るのは `so101_calib` で明示的な YAML を作るとき（Phase 2）だけです。
-その目的は再現性で、サーボを工場出荷リセットしても設定を復元できる、
-2台目の機体に同じ設定を配れる、という利点があります。
-
-JSON が無い場合は **`so101_calib --from-servos`** が EEPROM から
-`Homing offset` / `Min` / `Max` を読んで直接 YAML を起こします（6.2 参照）。
-lerobot の較正キャッシュは実行した PC のホームにしか無いので、
+`so101_calib --from-servos` はサーボから直接読むので、
+**JSON が手元に無くても offset を計算できます。**
+lerobot の較正キャッシュは較正を実行した PC のホームにしか無いので、
 **別の PC で作業する場合はこちらが本筋**です。
 
-ただし、**一度も較正していないサーボはどこかで較正する必要があります**
+```bash
+# JSON から読みたい場合（較正した PC でのみ）
+    --json ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json
+```
+
+ただし、**一度も較正していないサーボはどこかで較正が必要です**
 （lerobot の `lerobot-calibrate` でも、手で書いても構いません）。
-較正されていないと関節角のゼロ点も可動範囲もでたらめになります。
+較正されていないと可動域が `0..4095` のままで、offset を計算する材料がありません。
+`so101_calib` はその状態を検出して警告します。
+
+> **★ 手順6でトルクを切ったままにしないでください。**
+> driver v0.2.2 はトルクを入れないので、切ったまま手順7へ進むと
+> **脱力したまま指令だけが送られます**（動かないように見えます）。
+> 電源を入れ直すか、次で入れ直してください。
+>
+> ```bash
+> docker compose run --rm so101-follower \
+>   ros2 run so101_bringup so101_probe --port /dev/so101_follower --torque-on
+> ```
 
 ## 7. 実機: 起動して静止を確認する
 
 **アームの電源を入れ直し、手で支えてから:**
 
 ```bash
-HARDWARE_TYPE=real docker compose up
+docker compose up -d
+
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 launch so101_bringup follower.launch.py \
+    ros2_control_hardware_type:=real usb_port:=/dev/so101_follower
 ```
 
-一瞬脱力してから保持に入ります。
+`torque` 引数（既定 `true`）が `ros2_control` より**前に**トルクを入れます。
+driver v0.2.2 は自分では入れないためです。
+手で動かしながら確認したい場合は `torque:=false`。
 
 ```bash
 docker compose exec so101-follower /entrypoint.sh ros2 control list_hardware_components
@@ -815,7 +851,7 @@ echo "$DISPLAY"; ls -l /tmp/.X11-unix; xhost
 ```
 
 `xhost +si:localuser:root` をデスクトップにログインしているユーザーの端末から
-再実行してください。設定変更後は `docker compose down && docker compose up --force-recreate`。
+再実行してください。設定変更後は `docker compose down && docker compose up -d --force-recreate`。
 
 ## 既知の問題（上流）
 
@@ -838,7 +874,7 @@ read タイムアウトは 5ms で、タイムアウト時のリトライがあ�
 
 **このときトルクは切れません。** STS3215 にコマンドウォッチドッグは無いので、
 サーボは最後の指令位置を保持し続けます。アームは落ちませんが固まります。
-復帰には `docker compose down && docker compose up` が必要です。
+復帰には launch の再起動が必要です（`Ctrl+C` してから launch し直す）。
 
 ModemManager 対策と USB 接続の品質が効くのはこのためです。
 
