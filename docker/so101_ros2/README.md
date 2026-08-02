@@ -619,6 +619,39 @@ read タイムアウトは 5ms しかなく、タイムアウト時のリトラ�
 同じく velocity バグの影響です。`stall_velocity_threshold` を大きく
 （100.0）してあるか確認してください。
 
+### RViz に SO-101 ではなく別のロボットが表示される
+
+**別の ROS 2 スタックと DDS で混信しています。**
+
+`docker/` 以下の各構成は `network_mode: host` かつ `ROS_DOMAIN_ID` の既定が
+**すべて 0** です。そのため LeKiwi ベースや RPLIDAR のコンテナが同時に動いていると、
+`/robot_description` と `/tf` を複数のノードが publish し、
+RViz がどちらを掴むか決まらなくなります。
+
+```bash
+docker ps                                  # 他のコンテナが動いていないか
+docker compose exec so101-follower /entrypoint.sh ros2 node list
+docker compose exec so101-follower /entrypoint.sh \
+  ros2 topic info /robot_description --verbose | grep "Node name"
+```
+
+`/robot_description` の publisher が 2 個以上あれば確定です。
+
+対処は2つ。
+
+```bash
+# A) 他方を止める
+docker rm -f lekiwi-base rplidar-a1
+
+# B) ドメインを分けて共存させる
+ROS_DOMAIN_ID=41 docker compose up
+```
+
+> **同じ LAN 上の別マシン**で動かしている場合も混信します。
+> DDS のマルチキャスト探索はマシンをまたぐためです。
+> 複数人が同じネットワークで作業する場合は、各自 `.env` の `ROS_DOMAIN_ID` を
+> 変えてください（0〜232）。
+
 ### RViz にモデルは出るが、スライダで動かせない
 
 `view_description.launch.py` を使った場合、`joint_state_publisher_gui` が
