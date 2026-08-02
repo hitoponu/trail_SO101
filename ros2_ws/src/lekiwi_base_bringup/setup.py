@@ -30,6 +30,7 @@ setup(
             "base_driver = lekiwi_base_bringup.base_driver:main",
             "sts_bus = lekiwi_base_bringup.sts_bus:main",
             "fake_scan = lekiwi_base_bringup.fake_scan:main",
+            "save_map = lekiwi_base_bringup.save_map:main",
         ],
     },
 )
