@@ -607,41 +607,53 @@ docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
 
 **JTC で低く自立する姿勢へ動かしてから** `Ctrl+C` してください。
 
-## 設定を変えて試す（再ビルド不要）
+## 開発中の使い方（設定やコードを頻繁に変える場合）
 
-offset や PID を詰めるとき、毎回 `docker compose build` を回すのは面倒です。
-**開発用オーバーレイを使うと、編集して再起動するだけで反映されます。**
+**リポジトリを正、コンテナを実行環境として使うモードがあります。**
+ワークスペース全体（`ros2_ws/`）をホストからマウントするので、
+編集がそのまま反映され、ビルド成果物もホストに残ります。
 
 ```bash
+# 初回だけ（上流の取得とビルド）
+docker compose -f compose.yaml -f compose.dev.yaml run --rm so101-follower \
+  bash /bootstrap.sh
+
+# 以降
 docker compose -f compose.yaml -f compose.dev.yaml up
 ```
 
-### なぜ再ビルドが要らないのか
+### 何をしたらどうなるか
 
-イメージは `colcon build --symlink-install` でビルドしてあり、
-install 空間のファイルは実体ではなく symlink です。連鎖をたどると:
-
-```
-install/so101_bringup/share/.../so101_offsets.xacro
-  -> build/so101_bringup/config/so101_offsets.xacro
-    -> src/so101_bringup/config/so101_offsets.xacro
-```
-
-最終的に `/ros2_ws/src/so101_bringup` を読んでいるので、
-そこをホスト側のソースで上書きマウントすれば編集が直接効きます。
-
-### 反映されるもの / されないもの
-
-| | 再ビルド |
+| 変更内容 | 必要な操作 |
 | --- | --- |
-| `config/*.xacro`（offset・PID）、`control/*.xacro`、`launch/*.py`、Python | **不要** |
-| ファイルの新規追加 | 必要（colcon が symlink を張り直す） |
-| `setup.py` / `package.xml` の変更 | 必要 |
-| Dockerfile、apt パッケージ | 必要 |
+| `config/*.xacro`（offset・PID）、`control/`、`launch/`、Python の**編集** | **再起動だけ** |
+| ファイルの**新規追加**、`setup.py` / `package.xml` の変更 | コンテナ内で `colcon build` → 再起動 |
+| `Dockerfile`、apt パッケージ、上流の SHA | `docker compose build` |
 
-> **本番では使わないでください。** ホストのソースがイメージの中身を隠すので、
-> 「ビルドしたものがそのまま動く」という再現性が失われます。
-> 値が決まったら commit し、`docker compose build` で焼き込んでください。
+ファイルを追加したときのビルド:
+
+```bash
+docker compose exec so101-follower /entrypoint.sh \
+  bash -c "cd /ros2_ws && colcon build --symlink-install --packages-select so101_bringup"
+docker compose -f compose.yaml -f compose.dev.yaml restart
+```
+
+**ビルド成果物はホストの `ros2_ws/{build,install,log}` に残るので、
+`docker compose down` しても消えません**（`.gitignore` 済み）。
+
+### 素の `compose.yaml` との使い分け
+
+| | 中身 | 用途 |
+| --- | --- | --- |
+| `compose.yaml` のみ | イメージに焼かれたソースと install 空間 | 動作確認、配布。`up` だけで動く |
+| `+ compose.dev.yaml` | ホストの `ros2_ws` | **実機の調整中** |
+
+> 調整が終わったら**必ず commit して `docker compose build`** してください。
+> dev モードのままだと「イメージには古い値、ホストには新しい値」という
+> 食い違いが残ります。
+
+> アーキテクチャに依存するので、Mac で作った `build/install` を
+> Linux へ持って行っても動きません。**各マシンで一度 bootstrap** してください。
 
 ## トラブルシュート
 
