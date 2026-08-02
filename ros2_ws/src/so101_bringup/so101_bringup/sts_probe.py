@@ -41,6 +41,13 @@ HOMING_OFFSET = (31, 2)  # sign-magnitude, 符号ビット 11
 TORQUE_ENABLE = (40, 1)
 LOCK = (55, 1)  # EEPROM ロック. 0=解錠, 1=施錠
 PRESENT_POSITION = (56, 2)
+MAX_TORQUE_LIMIT = (16, 2)  # EEPROM. 最大 1000
+P_COEFFICIENT = (21, 1)  # STS3215 の既定は 32。lerobot は 16 に下げる
+D_COEFFICIENT = (22, 1)
+I_COEFFICIENT = (23, 1)
+PROTECTION_CURRENT = (28, 2)
+OVERLOAD_TORQUE = (36, 1)
+TORQUE_LIMIT = (48, 2)  # SRAM. 実行時の上限
 PRESENT_VOLTAGE = (62, 1)  # 単位 0.1V
 PRESENT_TEMPERATURE = (63, 1)  # °C
 
@@ -173,6 +180,11 @@ def main() -> None:
     parser.add_argument("--baudrate", type=int, default=1_000_000)
     parser.add_argument("--scan", action="store_true", help="1回読んで終了")
     parser.add_argument(
+        "--torque",
+        action="store_true",
+        help="トルク関連のレジスタ (PID・トルク上限・保護電流) を読む",
+    )
+    parser.add_argument(
         "--torque-off", action="store_true", help="トルクを切る (手で動かせるようにする)"
     )
     parser.add_argument("--watch", action="store_true", help="0.2秒ごとに更新し続ける")
@@ -186,6 +198,21 @@ def main() -> None:
 
     probe = Probe(args.port, ids, baudrate=args.baudrate)
     try:
+        if args.torque:
+            print(" id      P    D    I  MaxTorque  TorqueLim  ProtCurrent  Overload")
+            print("--- ------ ---- ---- ---------- ---------- ------------ ---------")
+            for motor_id in ids:
+                vals = [probe.read(r, motor_id) for r in
+                        (P_COEFFICIENT, D_COEFFICIENT, I_COEFFICIENT,
+                         MAX_TORQUE_LIMIT, TORQUE_LIMIT, PROTECTION_CURRENT, OVERLOAD_TORQUE)]
+                cells = "".join(f"{v if v is not None else '?':>{w}}"
+                                for v, w in zip(vals, (7, 5, 5, 11, 11, 13, 10)))
+                print(f"{motor_id:>3}{cells}")
+            print()
+            print("参考: STS3215 の P 既定は 32。lerobot は shakiness 回避で 16 に下げる。")
+            print("      MaxTorque の最大は 1000。lerobot は gripper のみ 500 にする。")
+            return
+
         if args.torque_off:
             probe.disable_torque()
             print("トルクを切りました。アームは自重で落ちます。手で支えてください。\n")

@@ -1,68 +1,73 @@
 # 依頼（Mac → 実機）
 
-- **更新**: 2026-08-02（3回目）
+- **更新**: 2026-08-02（4回目）
 - **状態**: 実行待ち
-- **安全区分**: 🟡（実機を起動します。人がアームを支える必要あり）
+- **安全区分**: 🟢 読み取りのみ
 
-## 前回の報告への回答 — 根本原因が判明しました
+## 前回の報告への回答
 
-**報告の数値が決定的でした。ありがとうございます。**
-
-`/joint_states` が `Present × 2π/4096` と**完全一致**していました
-（elbow_flex: `1847 × 2π/4096 = 2.8333` = 報告値そのもの）。
-**2048 を引いていない**、つまり全関節が **+π rad** ずれていました。
-
-### 原因: apt の driver と GitHub の main が別物
-
-私は GitHub の main を読んで設計していましたが、
-実際に入っているのは **apt の v0.2.2** で、パラメータの意味が違いました。
+**offset 修正は完全に効いています。** 検算しました。
 
 ```
-機能                  apt v0.2.2（実機）            GitHub main（私が読んでいた）
-中心値の扱い          per-joint の offset           kStsMidpoint(2048) 固定
-offset                必須。無いと 0                非推奨・無視される
-PID の綴り            p_cofficient（e 抜け）        p_coefficient
-joint_config_file     無い                          ある
-homing_offset         無い                          ある（EEPROM へ書く）
-range_min/max         無い                          ある（EEPROM へ書く）
+関節               (Present-offset)*k  /joint_states    差[deg]
+shoulder_pan                 0.1764         0.1764      0.00
+shoulder_lift                0.3083         0.3053      0.18
+elbow_flex                  -0.0307        -0.0322      0.09
+wrist_flex                   0.0430         0.0414      0.09
+wrist_roll                   1.8239         1.8208      0.18
+gripper                      0.4847         0.4832      0.09
 ```
 
-**私が「上流のバグ」として直したものは、すべて v0.2.2 では正しい記述でした。**
+全関節一致、`ERROR` も消え、`joint_trajectory_controller` と `gripper_controller` が
+`active` になりました。π rad のずれは解消です。
 
-- `offset` を削除した → **これが今回の原因**。無いと 0 になり π rad ずれる
-- `p_cofficient` を「正しい綴り」に直した → v0.2.2 は読まず、**PID が一度も効いていなかった**
-- `joint_config_file` を追加した → **v0.2.2 に無い。`so101_joints.yaml` は完全に無視されていた**
+`wrist_roll` の調整完了もありがとうございます。
+**`config/so101_offsets.xacro` の値を教えてください**（リポジトリに反映します）。
 
-### 良い知らせ: EEPROM は一度も書き換わっていません
+## 今回の課題: 対話型でモータの力が弱い
 
-`homing_offset` / `range_*` は v0.2.2 に存在しないので、
-**サーボの EEPROM には最初から一度も書き込まれていません。**
-前回の「(c) 分からない」の答えは **(b) そもそも書かれていなかった** です。
-較正値は lerobot が書いたまま無傷です。
+`send_goal` では問題ないが対話操作で弱い、という報告について、
+原因の候補が2つあります。**どちらがどれだけ効いているかを実測で切り分けたい**です。
 
-## 修正内容
+### 候補1: P ゲインが既定の半分
 
-`offset` 方式（v0.2.2）へ全面的に書き直しました。
-**EEPROM には一切書きません。純粋なソフト側の補正です。**
+lerobot が SO-101 に対して意図的に下げています。
 
-`config/so101_offsets.xacro` に機体の値を入れてあります。
-
-```
-関節            range        offset   Δ(=offset−2048)
-shoulder_pan     695..3409     2052        +4
-shoulder_lift    802..3154     1978       −70
-elbow_flex       670..3051     1916      −132
-wrist_flex      1014..3350     2182      +134
-wrist_roll         0..4095     2048        +0    ★暫定（範囲未記録のため計算不可）
-gripper         1961..3399     1961       −87    ★「閉」がどちら側か未確認
+```python
+# lerobot/robots/so_follower/so_follower.py
+# Set P_Coefficient to lower value to avoid shakiness (Default is 32)
+self.bus.write("P_Coefficient", motor, 16)
 ```
 
-Dockerfile に **driver のバージョン検査**も入れました。
-0.2.2 以外になったらビルドが止まり、xacro の更新が必要だと分かります。
+私はこれをそのまま `so101_follower.ros2_control.xacro` に写しました（`p_cofficient: 16`）。
+**STS3215 の既定は 32 なので半分です。**
+
+位置制御のトルクは概ね `P × 位置偏差` です。
+
+- `send_goal` … 時間軸のある軌道なので指令が実位置を先行し、**偏差が持続する** → 力が出る
+- 対話操作 … 指令が実位置に張り付くので **偏差がほぼゼロ** → 力が出ない
+
+**これが「対話型でだけ弱い」の説明になります。**
+
+### 候補2: 電源電圧が定格より低い
+
+実測 **4.8〜4.9V**。このアームのサーボは 7.4V 版（許容 4.0〜8.0V）です。
+
+DC モータの拘束トルクは概ね電圧に比例するので、
+**4.85 / 7.4 ≒ 66%**、つまり定格の約 2/3 しか出ていない計算になります。
+7.4V にすれば約 **1.5 倍**です。
+
+こちらは全体的な弱さで、モードによらず効きます。
+
+### 候補3（グリッパのみ）: トルク上限が 50%
+
+lerobot はグリッパだけ `Max_Torque_Limit=500`（最大 1000 の 50%）、
+`Overload_Torque=25` を EEPROM に書きます。焼損防止です。
+v0.2.2 はこのレジスタを触らないので、**lerobot が書いた値が残っています**。
 
 ## やってほしいこと
 
-### 手順 1 🟢 更新して再ビルド
+### 手順 1 🟢 更新
 
 ```bash
 git pull
@@ -70,78 +75,50 @@ cd docker/so101_ros2
 docker compose build
 ```
 
-### 手順 2 🟡 実機で起動する（人がアームを支えること）
+`so101_probe` に `--torque` を追加しました。トルク関連のレジスタを読みます。
 
-> 起動時に一瞬脱力します。**人が手を添えてから**。周囲 35cm を空けること。
-> 事前にアームの電源を入れ直してください。
-
-**まず起動前の `--scan` を取り、その姿勢のまま起動してください。**
-比較したいので、起動前後で姿勢を変えないでください。
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_probe --port /dev/so101_follower --scan
-
-HARDWARE_TYPE=real docker compose up 2>&1 | tee /tmp/so101_real2.log
-```
-
-### 手順 3 🟢 観測する（指令は送らない）
-
-```bash
-docker compose exec so101-follower /entrypoint.sh ros2 control list_controllers
-docker compose exec so101-follower /entrypoint.sh ros2 topic echo /joint_states --once --field name
-docker compose exec so101-follower /entrypoint.sh ros2 topic echo /joint_states --once --field position
-grep -E "ERROR|WARN|offset|out of bounds" /tmp/so101_real2.log
-```
-
-## 報告してほしいこと
-
-1. 手順2の**起動前** `--scan` 出力（全部）
-2. 手順3の出力すべて
-3. **RViz と実物が一致しているか。**ずれている関節があればどれか、目測で何度か
-4. `list_controllers` で **4つとも `active` / `inactive`（`unconfigured` でない）** か
-
-## 期待する結果
-
-`/joint_states` の各値が、起動前 `--scan` の **`q_ros` 列とほぼ一致**するはずです
-（前回は `Present × 2π/4096` になっていました）。
-
-一致すれば π rad のずれは解消です。`wrist_roll` と `gripper` は
-まだ暫定値なので、そこだけずれる可能性があります。
-
-### 手順 4 🟢 wrist_roll の可動域を測る（追加）
-
-**`wrist_roll` だけ offset が暫定値（2048＝補正なし）です。**
-lerobot がこの関節を「フルターンモータ」扱いして可動域を記録しない
-（`Min=0, Max=4095` 固定）ため、他の5関節のように計算で求められません。
-
-トルクを切って**手で**測ってください。
+### 手順 2 🟢 現在のトルク設定を読む
 
 ```bash
 docker compose down
 docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_probe --port /dev/so101_follower --torque-off --watch
+  ros2 run so101_bringup so101_probe --port /dev/so101_follower --torque
 ```
 
-1. `wrist_roll`（id 5）を**片方の端までゆっくり回し**、`Present` を記録
-2. **反対の端まで回し**、`Present` を記録
+### 手順 3 🟢 電圧を確認する
 
-> ⚠️ **抵抗を感じたら止めてください。無理に回さないこと。**
-> 可動端が機械的なストッパーではなく **配線** である可能性があります。
-> 力任せに回すとケーブルを切ります。
+```bash
+docker compose run --rm so101-follower \
+  ros2 run so101_bringup so101_probe --port /dev/so101_follower --scan
+```
 
-> ⚠️ **そもそも端が無く、ぐるぐる回り続ける可能性もあります。**
-> その場合は「端が無い」と報告してください。別の方法に切り替えます。
+`V` 列を見てください。**アームを動かしている最中**の電圧も知りたいので、
+可能なら `--watch` で動かしながら見て、**最低値**を教えてください
+（電圧降下が大きいなら電源容量の問題も疑えます）。
 
-## 報告してほしいこと（手順4ぶん）
+## 報告してほしいこと
 
-5. `wrist_roll` の可動端2点の `Present` 値。
-   **または「端が無く連続回転する」という事実**
+1. `--torque` の出力（全部）
+2. `--scan` の `V` 列。動作中の最低電圧も分かれば
+3. **`wrist_roll` の最終的な offset 値**（`so101_offsets.xacro` に何を入れたか）
+4. **「弱い」と感じた具体的な操作**。次のどれですか？
+   - `rqt_joint_trajectory_controller` のスライダ操作
+   - `forward_position_controller` を有効化しての操作
+   - その他（具体的に）
+5. **どの関節が特に弱いか**。全部か、特定の関節か
+   （グリッパだけなら候補3、根元の関節なら候補2 の可能性が高い）
 
-   （中点の計算はこちらでやります。折り返しをまたぐ場合があるので、
-   生の2値をそのまま書いてください）
+## 次にやること（報告を見てから）
+
+**候補1 なら**: `so101_follower.ros2_control.xacro` の `p:=16` を 24〜32 に上げます。
+xacro の1行なので試行は簡単です。ただし lerobot が下げた理由が
+「shakiness（振動）回避」なので、**上げると振動する可能性があります**。
+上げてから静止時に唸り・小刻みな振動が出ないか確認が要ります。
+
+**候補2 なら**: 電源を 7.4V 側へ上げる検討です。**ただし 8.0V を超えないこと。**
+これはハードウェアの変更なので、判断は人間にお願いします。
 
 ## やらないでほしいこと
 
-- **`send_goal` による関節の移動**（🔴）。今回も静止確認までです
-- `wrist_roll` を**力任せに回すこと**
+- **`send_goal` による関節の移動**（🔴）
+- **P ゲインを勝手に上げること**。振動するとアームが暴れます。報告を待ってください
