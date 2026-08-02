@@ -129,6 +129,15 @@ docker compose build
 docker compose up
 ```
 
+**RViz はこの `docker compose up` で一緒に立ち上がります**（別コマンドは不要）。
+`compose.yaml` が launch に `start_rviz:=${START_RVIZ:-true}` を渡しているためです。
+不要なら `.env` の `START_RVIZ=false`、または `START_RVIZ=false docker compose up`。
+
+> **macOS では RViz のウィンドウは出ません**（X サーバが無いため）。
+> ドライラン自体は動くので、下記のコマンドで**数値で確認**してください。
+> どうしても GUI が要る場合は XQuartz を入れて `xhost + localhost` し、
+> `DISPLAY=host.docker.internal:0` を渡す必要があります。
+
 別ターミナルで確認します。
 
 > **`docker compose exec` には `/entrypoint.sh` を前置します。**
@@ -178,6 +187,13 @@ docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
 ```
 
 RViz でモデルが動けば、URDF → コントローラ → TF の経路は正常です。
+**RViz が見られない環境（macOS など）では、代わりに数値で確認します。**
+
+```bash
+docker compose exec so101-follower /entrypoint.sh \
+  ros2 topic echo /joint_states --once --field position
+# -> shoulder_pan が 0.3 になっていれば同じことが確認できる
+```
 
 **★ このときの RViz のゼロ姿勢（全関節 0）を写真に撮っておいてください。**
 手順6でこれを基準に使います。
