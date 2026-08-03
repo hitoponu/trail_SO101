@@ -1,20 +1,10 @@
-# SO-101 follower の ros2_control コントローラ設定。
-#
-# 上流 (so_arm101_description/control/ros2_controllers.yaml) は
-# <robot_namespace> というプレースホルダを含み、nav2_common の ReplaceString で
-# 置換される前提になっている。そのままでは使えないので自前で書いている。
-#
-# 関節名は URDF (so_arm101_macro.xacro) に合わせて **_joint サフィックス付き**。
-# lerobot 側の名前 (shoulder_pan など、サフィックス無し) とは異なる。
-# 対応表は so101_bringup/lerobot_calib.py の LEROBOT_TO_ROS が唯一の出典。
+# SO-101 controllers. Hardware-specific calibration and registers are owned by
+# LeRobot; this file only configures standard ros2_control behavior.
 
 controller_manager:
   ros__parameters:
     update_rate: 50  # Hz
 
-    # ★ Jazzy の既定は false。true にすると URDF の <limit> で指令をクランプする。
-    #   read_only なので起動時に渡す必要がある (実行中には変更できない)。
-    #   タダで手に入る安全網なので必ず有効にする。
     enforce_command_limits: true
 
     joint_state_broadcaster:
@@ -25,11 +15,6 @@ controller_manager:
 
     gripper_controller:
       type: parallel_gripper_action_controller/GripperActionController
-
-    # 診断用。JTC と同じ command interface を奪い合うので --inactive で spawn する。
-    forward_position_controller:
-      type: position_controllers/JointGroupPositionController
-
 
 joint_trajectory_controller:
   ros__parameters:
@@ -45,15 +30,7 @@ joint_trajectory_controller:
       - position
       - velocity
     constraints:
-      # ★★ 好みの設定ではなく driver のバグ回避 ★★
-      #   feetech_ros2_driver v0.2.2 の read() は Present_Speed (reg 58) を
-      #   sign-magnitude (符号ビット15) として復号せずそのまま使っている。
-      #   このため負方向の微小な速度が約 +50 rad/s と読める。
-      #   stopped_velocity_tolerance は goal_state_tolerance[i].velocity として
-      #   評価されるので、既定の 0.01 のままだとゴール到達判定が必ず失敗し、
-      #   すべての軌道が GOAL_TOLERANCE_VIOLATED で終わる。
-      #   0.0 で無効化する。
-      stopped_velocity_tolerance: 0.0
+      stopped_velocity_tolerance: 0.01
       goal_time: 3.0
 
 
@@ -62,20 +39,5 @@ gripper_controller:
     joint: gripper_joint
     allow_stalling: true
     goal_tolerance: 0.03
-    # ★★ 同じく driver の velocity バグ回避 ★★
-    #   停動検出は |velocity| < stall_velocity_threshold で判定するが、
-    #   velocity が信用できないため既定の 0.001 では停動を検出できず、
-    #   物を掴んで止まったときにアクションが永久に返らなくなる。
-    #   実質無効化して allow_stalling と stall_timeout に任せる。
-    stall_velocity_threshold: 100.0
+    stall_velocity_threshold: 0.01
     stall_timeout: 1.0
-
-
-forward_position_controller:
-  ros__parameters:
-    joints:
-      - shoulder_pan_joint
-      - shoulder_lift_joint
-      - elbow_flex_joint
-      - wrist_flex_joint
-      - wrist_roll_joint

@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ros-jazzy-ros2-control はメタパッケージとして入れる。
 #   `ros2 control list_controllers` の実体は ros2controlcli にあり、
 #   これを引いてくるのはメタパッケージだけ。hardware_interface
-#   (mock_components/GenericSystem) と joint_limits (enforce_command_limits) も入る。
+#   hardware_interface と joint_limits (enforce_command_limits) も入る。
 #
 # コントローラは ros-jazzy-ros2-controllers をまとめて入れず個別に指定する。
 #   まとめると admittance_controller -> kinematics_interface -> KDL まで
@@ -24,12 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pynput \
       python3-vcstool \
       python3-yaml \
-      ros-jazzy-feetech-ros2-driver \
+      ros-jazzy-joint-state-topic-hardware-interface \
       ros-jazzy-joint-state-broadcaster \
       ros-jazzy-joint-state-publisher-gui \
       ros-jazzy-joint-trajectory-controller \
       ros-jazzy-parallel-gripper-controller \
-      ros-jazzy-position-controllers \
       ros-jazzy-robot-state-publisher \
       ros-jazzy-ros2-control \
       ros-jazzy-rqt-joint-trajectory-controller \
@@ -38,15 +37,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-tf2-tools \
       ros-jazzy-xacro \
     && rm -rf /var/lib/apt/lists/*
-
-# Ubuntu 24.04 は PEP 668 で system python を保護しているため、素の pip install は
-# externally-managed-environment で失敗する。このイメージは使い捨ての単一用途で、
-# feetech-servo-sdk には競合する dpkg パッケージも存在しないため上書きする。
-#
-# NOTE: feetech-servo-sdk には rosdep キーが無いので package.xml には書けない。
-#       このイメージが唯一の導入経路であり、rosdep install だけでは揃わない。
-# 使うのは so101_probe (実機のゼロ点実測) だけ。ros2_control 経路では使わない。
-RUN pip install --no-cache-dir --break-system-packages "feetech-servo-sdk==1.0.0"
 
 WORKDIR /ros2_ws
 
@@ -74,44 +64,31 @@ RUN . /opt/ros/jazzy/setup.sh \
     && colcon build --symlink-install \
          --packages-select so_arm_utils so_arm101_description so101_bringup
 
-# ビルド時スモークテスト。
-# 実機に通電してから壊れに気付くのを避けるため、ここで落とす。
-# ★ driver のバージョンを固定検査する。
-#   apt の v0.2.2 と GitHub main はパラメータの意味がまったく違う:
-#     v0.2.2 … per-joint の `offset` が中心値。PID は `p_cofficient`(e抜け)。
-#              joint_config_file / homing_offset / range_* は無い
-#     main   … `offset` は非推奨。中心値は kStsMidpoint 固定。
-#              joint_config_file と homing_offset がある
-#   control/so101_follower.ros2_control.xacro は **v0.2.2 前提**で書いてある。
-#   バージョンが変わったら xacro も直す必要があるので、ここで気付けるようにする。
-RUN test "$(dpkg-query -W -f='${Version}' ros-jazzy-feetech-ros2-driver | cut -d- -f1)" = "0.2.2" \
-    || (echo "!! feetech_ros2_driver のバージョンが 0.2.2 ではない。" \
-        && echo "!! so101_follower.ros2_control.xacro は v0.2.2 前提 (offset / p_cofficient)。" \
-        && echo "!! 上流の変更点を確認してから xacro を更新すること。" && exit 1)
+# Hardware communication, calibration and motor configuration all come from
+# LeRobot. Do not add a direct Feetech SDK or feetech_ros2_driver dependency.
+# Install it after colcon so a transient package-index failure does not discard
+# the ROS workspace build layer. Ubuntu's packaging/numpy are dpkg-managed and
+# cannot be upgraded by pip, so shadow only those two in /usr/local first.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --timeout 120 --break-system-packages --ignore-installed --no-deps \
+      "packaging==25.0" "numpy==2.2.6" \
+    && pip install --timeout 120 --break-system-packages \
+      "lerobot[feetech]==0.5.1"
 
+# Build-time static smoke tests. Physical hardware and ROS runtime tests are
+# intentionally deferred to the target Linux host.
 RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
-    && ros2 pkg prefix feetech_ros2_driver > /dev/null \
+    && ros2 pkg prefix joint_state_topic_hardware_interface > /dev/null \
     && D="$(ros2 pkg prefix so_arm101_description)/share/so_arm101_description" \
     && B="$(ros2 pkg prefix so101_bringup)/share/so101_bringup" \
     && xacro "$D/urdf/so_arm101.urdf.xacro" \
-         ros2_control_hardware_type:=mock_components \
+         ros2_control_hardware_type:=real \
          ros2_control_file:="$B/control/so101_follower.ros2_control.xacro" > /tmp/mock.urdf \
     && check_urdf /tmp/mock.urdf > /dev/null \
-    && grep -q 'mock_components/GenericSystem' /tmp/mock.urdf \
-    && xacro "$D/urdf/so_arm101.urdf.xacro" \
-         ros2_control_hardware_type:=real usb_port:=/dev/null \
-         ros2_control_file:="$B/control/so101_follower.ros2_control.xacro" > /tmp/real.urdf \
-    && check_urdf /tmp/real.urdf > /dev/null \
-    && grep -q 'feetech_ros2_driver/FeetechHardwareInterface' /tmp/real.urdf \
-    && grep -q 'name="offset"' /tmp/real.urdf \
-    && grep -q 'p_cofficient' /tmp/real.urdf \
-    && ! grep -q 'joint_config_file' /tmp/real.urdf \
-    && python3 -c "import scservo_sdk, yaml" \
-    && python3 -c "from so101_bringup import lerobot_calib, sts_probe" \
-    && python3 -c "import re,sys; t=open('/tmp/real.urdf').read(); \
-                   o=[int(m) for m in re.findall(r'<param name=\"offset\">(-?[0-9]+)</param>', t)]; \
-                   sys.exit(0 if len(o)==6 and all(0<=v<=4095 for v in o) else 1)" \
-    && python3 -c "from so101_bringup import cartesian_jog, cartesian_math, keyboard_input" \
+    && grep -q 'joint_state_topic_hardware_interface/JointStateTopicSystem' /tmp/mock.urdf \
+    && ! grep -Eq 'feetech_ros2_driver|p_cofficient|name="offset"' /tmp/mock.urdf \
+    && python3 -c "import lerobot; from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig; from so101_bringup import bridge_core, lerobot_backend" \
+    && python3 -c "from so101_bringup import cartesian_jog, cartesian_math, keyboard_input, lerobot_bridge" \
     && python3 -c "import yaml,sys; d=yaml.safe_load(open('$B/config/ros2_controllers.yaml')); \
                    j=d['joint_trajectory_controller']['ros__parameters']['joints']; \
                    sys.exit(0 if len(j)==5 and 'gripper_joint' not in j else 1)"
@@ -130,5 +107,5 @@ RUN printf '%s\n' \
       >> /etc/bash.bashrc
 
 ENTRYPOINT ["/entrypoint.sh"]
-# 既定は mock_components。素の `docker run` では実機に触れない。
+# 既定はbridgeのmock backend。素の `docker run` では実機に触れない。
 CMD ["ros2", "launch", "so101_bringup", "follower.launch.py"]

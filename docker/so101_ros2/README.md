@@ -1,909 +1,175 @@
-# SO-101 フォロワアーム + ROS 2 Jazzy + Docker
+# SO-101 follower ROS 2
 
-単体の SO-101 アーム（Feetech STS3215 × 6、モータ ID 1–6）を ROS 2 の
-`ros2_control` で駆動する構成です。`FollowJointTrajectory` で関節を動かし、
-グリッパを `GripperActionController` で開閉できます。
+Linuxホスト上のDockerでSO-101フォロワアームを制御します。LeRobot 0.5.1が
+実機I/O、モーター設定、較正を担当し、ROS 2 Jazzyが標準の`ros2_control` APIを
+提供します。
 
-サーボ制御には apt で配布されている
-[`feetech_ros2_driver`](https://github.com/ros-physical-ai/feetech_ros2_driver)
-（OSRA Physical AI SIG、BSD-3）を使い、URDF は
-[`ros2_so_arm`](https://github.com/ros-physical-ai/ros2_so_arm) の
-`so_arm101_description` を取り込みます。自前で書いているのは launch と設定、
-そして較正まわりのツールだけです。
+## システム構成
+
+```text
+FollowJointTrajectory / rqt / Cartesian jog
+                    ↓
+          ros2_control controllers
+                    ↓
+  JointStateTopicSystem（標準アダプタ）
+                    ↓  sensor_msgs/JointState
+            LeRobot ROS bridge
+                    ↓
+              SO101Follower
+```
+
+ユーザーからの軌道指令とグリッパ指令は`ros2_control`の各コントローラが
+受け取ります。`JointStateTopicSystem`は関節指令と関節状態を
+`sensor_msgs/JointState`でLeRobot ROS bridgeと交換します。ブリッジは次を担当します。
+
+- ROS関節名とLeRobotモーター名の対応付け
+- 回転関節のrad/degree変換とグリッパ開度の変換
+- LeRobot `SO101Follower`への指令送信と状態取得
+- 関節速度の推定とROSへの状態配信
+- 指令の検証、watchdog、異常時の安全停止
+
+機体固有のモーターID、回転方向、ホーミングオフセット、可動範囲はLeRobotの
+較正JSONで管理します。起動時にブリッジが較正JSONとサーボEEPROMの整合性を
+確認します。
+
+## 動作環境
+
+- Linuxホスト
+- Docker EngineとDocker Compose v2
+- USBシリアルデバイスとして接続したSO-101フォロワアーム
+- RViz 2を表示する場合はX11またはXWayland
 
 ## 安全上の注意
 
-**必ず先に読んでください。アームは自重で落ちます。**
+- 実機起動前にアームを低い安定姿勢へ置いてください。
+- 正常終了またはwatchdog作動時、ブリッジはLeRobot経由でトルクを切ります。
+  アームが脱力して落下するため、停止前にも低い姿勢へ移動してください。
+- `SIGKILL`、ホスト停止、電源断ではソフトウェアによるトルクOFFを保証できません。
+- 起動時はトルクOFF中に現在位置を`Goal_Position`へラッチしてからLeRobotの
+  モーター設定を適用します。
+- 較正JSONとサーボEEPROMが一致しない場合、ROS側から自動修復せず起動を中止します。
 
-- **正常終了（`Ctrl+C` / `docker compose down`）でアームは脱力して落ちます。**
-  `feetech_ros2_driver` の `on_deactivate()` が全関節のトルクを切るためです。
-  **停止する前に必ず低く畳んだ姿勢へ動かしてください。**
-- **`docker kill -s SIGKILL` ではトルクは切れません**（その場で凍結します）。
-  「今すぐ動きを止めたいが落としたくない」ときはこちらです。ただしサーボは
-  保持し続けるので発熱します。
-- **ドライバはトルクを入れません。** driver v0.2.2 は `set_torque(true)` を
-  一度も呼ばず、**トルクはサーボの電源投入時の状態のまま**です
-  （`on_deactivate` で切るだけ）。したがって:
-  - `so101_probe --torque-off` の後に電源を入れ直さず起動すると、
-    **脱力したまま指令だけが送られます**（「動かない」に見える）。
-    `so101_probe --torque-on` で入れ直せます
-  - 起動時に脱力することはありません（それは上流 main 系の挙動です）
-- **ROS を起動する前にアームの電源を入れ直すことを推奨します。**
-  トルク状態が確実にリセットされ、サーボの `Goal_Position` に残った
-  前回セッションの値へ飛ぶ事故も防げます。
-- 半径 35cm 以内を空け、肘の下に発泡ブロックなどの受けを置いてください。
-- **アーム専用電源のスイッチが唯一の物理的な非常停止です。** 手の届く所に。
-- lerobot 側のプロセスを止めてください。同じポートを二重に開けません。
+## 1. モーター設定と較正
 
-> この機体は LeKiwi とは**別のアーム**で、自前の 5V/7.4V 電源を持ちます。
-> LeKiwi の 12V バスとは無関係なので、電圧に関する制約はありません。
-> （LeKiwi 搭載のアームは 7.4V 版で 12V バスに繋いではいけません。別の話です。）
+LeRobot 0.5.1を用意し、実機を接続して次を実行します。`robot.id`は以後すべての
+起動で同じ値を使用してください。
 
-### 非常停止の一覧
+```bash
+lerobot-setup-motors \
+  --robot.type=so101_follower \
+  --robot.port=/dev/so101_follower
 
-| 状況 | 操作 | トルク | 結果 |
-| --- | --- | --- | --- |
-| 今の動作だけ止めたい | 実行中の `send_goal` を `Ctrl+C`（goal cancel） | ON | その場で保持。**最速のソフト停止** |
-| 制御を切り離したい | `ros2 control switch_controllers --deactivate joint_trajectory_controller` | ON | 最後の指令位置で保持 |
-| 動きを凍結したい | **`docker compose down`** | ON | **凍結**（下記参照） |
-| 動きを凍結したい | `docker kill -s SIGKILL so101-follower` | ON | 凍結（発熱注意） |
-| 脱力させたい | **launch を `Ctrl+C`** | **OFF** | **脱力して落ちる** |
-| 完全停止 | アーム電源スイッチ OFF | **OFF** | **脱力して落ちる**。唯一の物理的非常停止 |
+lerobot-calibrate \
+  --robot.type=so101_follower \
+  --robot.port=/dev/so101_follower \
+  --robot.id=my_follower
+```
 
-> **★ `docker compose down` ではアームは落ちません（凍結します）。**
-> launch は `docker compose exec` で動いており **PID 1 の子ではない**ため、
-> コンテナ停止時に SIGINT が届きません（実測で確認）。
-> `on_deactivate` が走らないのでトルクが入ったままになります。
->
-> **脱力させたいときは launch を動かしている端末で `Ctrl+C`** してください。
-> こちらは SIGINT が届き、`on_deactivate` がトルクを切ります（＝落ちます）。
->
-> 停止前に低く畳んだ姿勢へ動かすべきなのは `Ctrl+C` の場合です。
+較正ファイルはLeRobot 0.5.1では次に保存されます。
 
-## 前提
+```text
+~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_follower.json
+```
 
-- Linux ホスト（X11 または XWayland を利用できるデスクトップ環境）
-- Docker Engine と Docker Compose v2
-- SO-101 フォロワアーム、WaveShare サーボコントローラ、専用電源
+composeはこのディレクトリをコンテナの同じ場所へread-onlyでmountします。
+ROS起動中に較正を作成・変更することはできません。
 
-> macOS では Docker にシリアルデバイスを渡せないため実機制御はできません。
-> ただし**モックでのドライラン（後述の手順4）は macOS でも実行できます。**
-> Mac から直接アームを動かす場合は `examples/record_and_move.py` を使ってください。
-
-以下のコマンドは、この README があるディレクトリで実行します。
+## 2. コンテナの構築
 
 ```bash
 cd docker/so101_ros2
-```
-
-## 1. USBデバイスを確認する
-
-```bash
-ls -l /dev/ttyACM* 2>/dev/null
-dmesg --follow
-udevadm info --attribute-walk --name=/dev/ttyACM0 | grep -m1 'ATTRS{serial}'
-```
-
-**★ VID:PID ではなく `ATTRS{serial}` で識別します。**
-SO-101 の基板と LeKiwi ベースの基板は同じ WaveShare 設計で **VID:PID が同一**です。
-VID:PID でルールを書くと `/dev/lekiwi` と `/dev/so101_follower` が
-同じ基板を指してしまいます。
-
-確認したシリアルを `99-so101.rules` に反映してからコピーします。
-
-```bash
-sudo cp 99-so101.rules /etc/udev/rules.d/99-so101.rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-# 反映されない場合はUSBを抜き差しする
-ls -l /dev/so101_follower
-sudo usermod -aG dialout "$USER"   # 追加後は再ログインが必要
-```
-
-LeKiwi の基板も繋いでいる場合は、`/dev/lekiwi` と `/dev/so101_follower` が
-**別の** `ttyACM*` を指していることを必ず確認してください。
-
-**できれば USB ハブを使わず PC へ直結してください**（禁止ではありません。後述）。
-ドライバのシリアル read タイムアウトは **5ms** で、タイムアウトした場合の
-リトライがありません。通信エラーが1回起きると `read()` が ERROR を返し、
-ハードウェアコンポーネントがエラー状態へ落ちて**制御が切れます**
-（トルクは入ったままなので、アームは最後の指令位置で止まります）。
-復帰にはスタックの再起動が必要です。
-
-ハブを使う場合の注意点。
-
-- **バスパワーハブでも問題ありません。** サーボの電源は基板の DC ジャックから
-  別途供給されており、USB から取るのはブリッジ IC とロジックの分だけなので
-  消費はごくわずかです
-- **カメラなど帯域を食うデバイスと同じハブに挿さない** — これが一番効きます。
-  リスクは電力ではなく帯域と遅延です
-- 安価なハブは避ける
-
-`99-so101.rules` の `ID_MM_DEVICE_IGNORE`（ModemManager 対策）は
-ハブの有無に関わらず必要です。
-
-## 2. 環境ファイルを作る
-
-```bash
-cp .env.example .env
-sed -i "s/^DIALOUT_GID=.*/DIALOUT_GID=$(getent group dialout | cut -d: -f3)/" .env
-```
-
-## 3. RViz用のX11アクセスを許可する
-
-```bash
-xhost +si:localuser:root
-```
-
-## 4. モックでドライランする（実機に一切触れない）
-
-**実機を繋ぐ前に必ずここを通してください。** シリアルポートを開かないので
-リスクはゼロです。既定値が `mock_components` なので引数は要りません。
-
-```bash
 docker compose build
-docker compose up -d            # ← コンテナが待機するだけ。何も起きない
+docker compose up -d
 ```
 
-**`docker compose up` では ROS ノードも RViz もトルクも起動しません。**
-コンテナは `sleep infinity` で待機するだけです。
-起動の主体は `follower.launch.py` で、明示的に実行します。
+実機デバイスを渡す場合は`.env`を作成します。
+
+```dotenv
+SO101_DEVICE=/dev/so101_follower
+DIALOUT_GID=20
+```
+
+udevの安定名を使わない環境では、`SO101_DEVICE=/dev/ttyACM0`のように指定し、
+launchの`usb_port`も同じパスにします。
+
+## 3. 起動
+
+引数なしではmock backendを使用し、シリアルポートを開きません。
 
 ```bash
 docker compose exec -it so101-follower /entrypoint.sh \
   ros2 launch so101_bringup follower.launch.py
 ```
 
-**RViz はこの launch が立ち上げます**（`start_rviz:=false` で抑止できます）。
-
-この形にしている理由:
-
-- **`up` しただけでは実機に触れない。** 実機を動かすのが明示的な操作になる
-- **launch を `Ctrl+C` で止めれば `on_deactivate` が走る**（コンテナは生きたまま）。
-  何度も起動し直すのにコンテナの作り直しが要らない
-
-> **macOS では RViz のウィンドウは出ません**（X サーバが無いため）。
-> ドライラン自体は動くので、下記のコマンドで**数値で確認**してください。
-> どうしても GUI が要る場合は XQuartz を入れて `xhost + localhost` し、
-> `DISPLAY=host.docker.internal:0` を渡す必要があります。
-
-別ターミナルで確認します。
-
-> **`docker compose exec` には `/entrypoint.sh` を前置します。**
-> `exec` は ENTRYPOINT を通らないため、そのままでは `setup.bash` が source されず
-> `ros2: executable file not found in $PATH` になります。
-> `docker compose run` や `up` は ENTRYPOINT を通るので前置は不要です。
->
-> 対話的に触りたい場合は `docker compose exec -it so101-follower bash` で入れば、
-> `/etc/bash.bashrc` が source 済みなのでそのまま `ros2` が使えます。
+実機は明示的に`backend:=lerobot`と較正IDを指定します。
 
 ```bash
-docker compose exec so101-follower /entrypoint.sh ros2 control list_hardware_components
-docker compose exec so101-follower /entrypoint.sh ros2 control list_controllers
-docker compose exec so101-follower /entrypoint.sh ros2 action list
-docker compose exec so101-follower /entrypoint.sh ros2 topic echo /joint_states --once
-```
-
-期待する状態:
-
-```
-SO_ARM101  system  mock_components/GenericSystem  active
-
-forward_position_controller  position_controllers/JointGroupPositionController           inactive
-gripper_controller           parallel_gripper_action_controller/GripperActionController  active
-joint_trajectory_controller  joint_trajectory_controller/JointTrajectoryController       active
-joint_state_broadcaster      joint_state_broadcaster/JointStateBroadcaster               active
-
-/gripper_controller/gripper_cmd
-/joint_trajectory_controller/follow_joint_trajectory
-```
-
-`forward_position_controller` だけ `inactive` なのは意図的です
-（JTC と同じ command interface を奪い合うため。診断用の逃げ道として置いてあります）。
-
-モック相手に指令を投げて経路全体を検証します。
-
-```bash
-docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
-  /joint_trajectory_controller/follow_joint_trajectory \
-  control_msgs/action/FollowJointTrajectory \
-  "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_flex_joint, wrist_flex_joint, wrist_roll_joint],
-     points: [{positions: [0.3, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 3}}]}}" --feedback
-
-docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
-  /gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand \
-  "{command: {name: [gripper_joint], position: [0.5]}}" --feedback
-```
-
-RViz でモデルが動けば、URDF → コントローラ → TF の経路は正常です。
-**RViz が見られない環境（macOS など）では、代わりに数値で確認します。**
-
-```bash
-docker compose exec so101-follower /entrypoint.sh \
-  ros2 topic echo /joint_states --once --field position
-# -> shoulder_pan が 0.3 になっていれば同じことが確認できる
-```
-
-### エンドエフェクタをキーボードで動かす
-
-コンテナ内で専用のCartesian Jogを明示的に起動します。通常のbringupでは
-自動起動しません。
-
-```bash
-ros2 launch so101_bringup keyboard_teleop.launch.py
-```
-
-| キー | `base_link` 基準の動作 |
-| --- | --- |
-| `W` / `S` | +X / −X |
-| `A` / `D` | +Y / −Y |
-| `R` / `F` | +Z / −Z |
-| `Q` / `Esc` | 終了 |
-
-キーを押している間だけ動き、離すと現在位置を保持します。同時押しによる斜め移動にも
-対応し、合成速度は既定の `0.02 m/s` を超えません。速度などはlaunch引数で変更できます。
-
-```bash
-ros2 launch so101_bringup keyboard_teleop.launch.py \
-  linear_speed:=0.01 max_joint_velocity:=0.3
-```
-
-**★ このときの RViz のゼロ姿勢（全関節 0）を写真に撮っておいてください。**
-手順6でこれを基準に使います。
-
-## 5. 実機: 通信だけ確認する（ROS を起動しない）
-
-`.env` の `SO101_DEVICE=/dev/so101_follower` に変更し、**アームの電源を入れ直して**から:
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_probe --port /dev/so101_follower --scan
-```
-
-期待: ID 1–6 が `model 777`（STS3215）で応答し、電圧が 6.0–8.4V。
-
-読み取れた `Homing offset` / `Min` / `Max` を lerobot の較正値と突き合わせます
-（`~/.cache/huggingface/lerobot/calibration/robots/so_follower/*.json`）。
-一致していれば、ROS 側は lerobot とまったく同じ較正値を使うことになります。
-
-## 6. 実機: 回転方向を確認し、ゼロ点を合わせる
-
-ドライバは `on_init` でトルクを入れてしまうので、`ros2_control` が動いている
-状態ではアームを手で動かせません。トルクを切って生の値を読む計測器を使います。
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_probe --port /dev/so101_follower --torque-off --watch
-```
-
-### 6.1 回転方向を確認する（これは必須）
-
-#### 「+ 方向」は URDF から決まる（下の表がその答え）
-
-頭の中で右ねじを考える必要も、GUI を開く必要もありません。
-URDF から一意に決まる値なので、**モック環境で TF を読んで測定済み**です。
-
-| 関節 | 回転軸（base_link） | **+ 方向** |
-| --- | --- | --- |
-| `shoulder_pan` | −Z | **上から見て時計回り**（手先が右へ） |
-| `shoulder_lift` | +Y | **腕が前に倒れる**（手先が下へ） |
-| `elbow_flex` | +Y | **同じ向きに曲がる**（手先が下へ） |
-| `wrist_flex` | +Y | **手首が下を向く** |
-| `wrist_roll` | −X | **正面から手先を見て時計回り** |
-| `gripper` | −Y | **開く**（URDF のゼロが「閉」のため） |
-
-ホーム姿勢（全関節 0）では手先 `gripper_frame_link` が
-`base_link` から `x=+0.391, y=0.000, z=+0.226 [m]`、
-各関節を +0.5 rad にしたときの手先変位は次のとおりでした。
-
-```
-shoulder_pan    Δ=[ -43.3  -169.0    -0.0] mm
-shoulder_lift   Δ=[ +13.2    +0.0  -167.9] mm
-elbow_flex      Δ=[ -37.4    +0.0  -140.7] mm
-wrist_flex      Δ=[ -23.3    +0.0   -75.4] mm
-wrist_roll      Δ=[  +0.0    -3.8    +1.1] mm   ← 軸まわりの回転なので手先はほぼ動かない
-```
-
-`wrist_roll` は手先が回転軸のほぼ上に乗っているため変位では判定できません。軸で判断します。
-
-#### 自分で確かめたい場合
-
-**この表は URDF から計算した値なので、確認は任意です。**
-確かめるならモック環境で指令を出し、RViz で見ます（手順4がそのまま使えます）。
-
-```bash
-docker compose up -d
-docker compose exec -it so101-follower /entrypoint.sh \
-  ros2 launch so101_bringup follower.launch.py       # 既定は mock_components
-```
-
-別ターミナルから **1関節だけ +0.5 rad** にします。配列の位置を変えれば他の関節になります
-（順に shoulder_pan / shoulder_lift / elbow_flex / wrist_flex / wrist_roll）。
-
-```bash
-docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
-  /joint_trajectory_controller/follow_joint_trajectory \
-  control_msgs/action/FollowJointTrajectory \
-  "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_flex_joint, wrist_flex_joint, wrist_roll_joint],
-     points: [{positions: [0.5, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 2}}]}}"
-```
-
-グリッパは別アクションです。
-
-```bash
-docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
-  /gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand \
-  "{command: {name: [gripper_joint], position: [0.5]}}"
-```
-
-**GUI を一切使わずに数値で確認することもできます**（RViz が開かない環境向け）。
-
-```bash
-docker compose exec so101-follower /entrypoint.sh \
-  ros2 run tf2_ros tf2_echo base_link gripper_frame_link
-```
-
-指令の前後で手先座標がどう変わるかを見れば、上の表と同じことが分かります。
-
-> **スライダで操作したい場合**（任意）:
-> ```bash
-> docker compose run --rm --service-ports so101-follower \
->   ros2 launch so_arm101_description view_description.launch.py rviz:=true
-> ```
-> ただし `joint_state_publisher_gui` は Qt が初期化できないと
-> `[ros2run]: Aborted` で落ちます。**RViz は別プロセスなので生き残るため、
-> 「モデルは見えるがスライダが無い＝動かない」**という分かりにくい症状になります。
-> その場合は `ros2 node list` に `joint_state_publisher_gui` が居るか確認し、
-> 居なければ上の send_goal 方式を使ってください。
-
-> 理屈で確認したい場合: SO-101 は6関節とも `<axis xyz="0 0 1"/>` なので、
-> **子リンクのフレームの Z 軸（RViz の TF 表示で青）に右手の親指を向けたとき、
-> 指の巻く向き**が + です。子リンクは順に `shoulder_link` / `upper_arm_link` /
-> `lower_arm_link` / `wrist_link` / `gripper_link` / `jaw_link`。
-
-#### 次に実機で確かめる（ここが本題）
-
-上の表は **URDF（モデル）上の + 方向**です。**実機のサーボが同じ向きに回るかは
-別問題**なので、ここは飛ばせません。表は「こう回るはず」という期待値として使います。
-
-`so101_probe --torque-off --watch` を出したまま、**1関節ずつ**、
-表の **+ 方向へ手で押して `Present` が増える**ことを確認します。
-
-`Present` が**減る**関節は、サーボの回転方向が URDF の軸と逆です。
-ドライバに反転パラメータはないので、URDF の `<axis xyz>` の符号を
-ローカルで反転させるしかありません（`homing_offset` では方向は直せません）。
-
-### 6.2 ゼロ点は可動域から計算できる（目測不要・推奨）
-
-**姿勢を手で作る必要はありません。**
-
-SO-101 の new_calib の規約は「各関節の仮想ゼロ＝**可動域の中間**」です。
-そして lerobot の較正はすでに `record_ranges_of_motion` で
-**機械的な可動端**を記録しています。可動端は客観的で再現性があるので、
-そこからゼロ位置を逆算できます。
-
-**較正値はサーボの EEPROM から直接読めます。lerobot の JSON は不要です。**
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_calib \
-    --from-servos --port /dev/so101_follower --from-ranges --emit-ranges
-```
-
-> lerobot の較正キャッシュ（`~/.cache/huggingface/...`）は
-> **較正を実行した PC のホームにしか存在しません**。別の PC で作業している場合、
-> そのパスを `-v` でマウントしようとすると Docker が空ディレクトリを作り、
-> `IsADirectoryError: Is a directory: '/calib.json'` になります。
-> `--from-servos` ならこの問題自体が起きません。
->
-> JSON から読みたい場合は `--json <path>` を使います（両者は排他）。
-
-この機体の較正値では次のように出ます。
-
-```
-shoulder_pan   Δ =   +62 tick (  +5.4°)
-shoulder_lift  Δ =   -11 tick (  -1.0°)
-elbow_flex     Δ =  -120 tick ( -10.5°)
-wrist_flex     Δ =   -39 tick (  -3.4°)
-gripper        Δ =  -790 tick ( -69.4°)
-```
-
-非対称な limit（`elbow_flex` は `-1.69..+1.54`）にも対応するため、単純な中点では
-なく「limit 内でのゼロの位置比率」で内挿しています。
-グリッパは URDF のゼロが「閉」＝可動端なので別式です。
-
-#### この方法の前提と例外
-
-- **較正時に機械的な可動端まで振り切れていること。** 途中で止めていると中点が
-  ずれます。再スイープして `range_min`/`range_max` が再現するかで検証できます
-- **`wrist_roll` は計算できません。** lerobot がフルターン扱いにして可動域を
-  記録しない（`0..4095` 固定）ためです。この関節だけ `--delta wrist_roll=...` で
-  個別に与えるか、6.3 の反復補正で合わせます
-- **グリッパは「どちらの可動端が閉か」だけ確認が必要です。** 既定は `range_min`。
-  逆なら `--gripper-closed max` を付けます。閉じながら `so101_probe` で
-  `Present` を見れば一目で分かります
-
-裏付けとして、実測可動域は URDF の limit より片側 5〜16° 広く、
-**実測＝機械的ストッパー / URDF＝保守的なソフトリミット**という関係と整合しています。
-
-### 6.3 どこまで精度が要るか
-
-必要な精度は用途次第です。
-
-| 用途 | 必要精度 | 根拠 |
-| --- | --- | --- |
-| 関節を動かす / RViz と一致させる（このマイルストーン） | **数度で十分** | ずれても表示が少し傾くだけ |
-| MoveIt、物を掴む | 1° 程度 | 腕長 0.3m で **1° ≈ 5mm**、5° ≈ 26mm |
-
-エンコーダの分解能は 1 tick = **0.088°**（手先 0.46mm）なので、精度の制約は
-機械側ではなく手法側です。ちなみに姿勢を目視で合わせる精度は ±2〜5° 程度で、
-6.2 の計算（可動端由来）より一桁粗くなります。**だから目測はしません。**
-
-`--from-ranges` を使わずに Δ=0 のまま始めることもできます。上の表のとおり
-`elbow_flex` 以外は数度以内なので、このマイルストーンの範囲なら実害はありません。
-
-### 6.4 仕上げ: RViz と実物のずれで検証する
-
-計算したΔが正しいかは、**RViz と実物を見比べる**のが最終確認です。
-ずれていた場合の補正もここで行います（`wrist_roll` はこの方法でしか合わせられません）。
-
-1. 6.2 で生成した設定で手順7へ進んで起動する
-2. RViz と実物を見比べ、ずれている関節について「何度ずれているか」だけ目測する
-3. `Δ[tick] = ずれ角[°] × 11.38` を足して `so101_offsets.xacro` を更新、再起動
-4. 再起動して確認。必要なら繰り返す
-
-**絶対姿勢を作るのではなく「差」を読むだけ**なので、目測でも十分な精度が出ます。
-2〜3回で収束します。
-
-> さらに精度が要る場合は、平らな印刷面に**水平器やスコヤを当てる**方法があります。
-
-### 6.5 設定ファイルへ反映する
-
-`so101_calib` は **offset を xacro 形式で標準出力へ吐く**だけなので、
-リダイレクトでファイルにします。診断メッセージは標準エラーへ出るので混ざりません。
-
-このディレクトリ（`docker/so101_ros2`）から:
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_calib \
-    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
-  > ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro
-```
-
-**いきなり上書きせず、一度確認するほうが安全です。**
-
-```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_calib \
-    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
-  > /tmp/so101_offsets.xacro
-
-diff -u ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro /tmp/so101_offsets.xacro
-cp /tmp/so101_offsets.xacro ../../ros2_ws/src/so101_bringup/config/so101_offsets.xacro
-```
-
-出来上がるのはこういうファイルです。
-
-```xml
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:property name="so101_offset_shoulder_pan" value="2052"/>  <!-- Δ=+4 -->
-  <xacro:property name="so101_offset_shoulder_lift" value="1978"/>  <!-- Δ=-70 -->
-  ...
-</robot>
-```
-
-反映のさせ方は使っているモードによります。
-
-| モード | 反映方法 |
-| --- | --- |
-| 開発用オーバーレイ（`-f compose.dev.yaml`） | **再起動だけ** |
-| 素の `compose.yaml` | `docker compose build` |
-
-`--delta` で関節ごとに上書きできます（`wrist_roll` はこれで与えます）。
-
-```bash
-    --from-servos --port /dev/so101_follower --from-ranges --emit-xacro \
-    --delta wrist_roll=68
-```
-
-> **`offset` はサーボの EEPROM には書きません。** driver v0.2.2 の
-> `offset` はソフト側だけで完結する値で、`read/write` の変換に使われるだけです。
-> 較正値（`homing_offset` / `range_*`）は lerobot が書いたものが無傷で残ります。
-> **設定を間違えても壊れないのが、この方式の利点です。**
-
-### 6.6 lerobot の較正 JSON は必須ではない
-
-**較正値の実体はサーボの EEPROM にあり、JSON はその控えにすぎません。**
-
-`so101_calib --from-servos` はサーボから直接読むので、
-**JSON が手元に無くても offset を計算できます。**
-lerobot の較正キャッシュは較正を実行した PC のホームにしか無いので、
-**別の PC で作業する場合はこちらが本筋**です。
-
-```bash
-# JSON から読みたい場合（較正した PC でのみ）
-    --json ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json
-```
-
-ただし、**一度も較正していないサーボはどこかで較正が必要です**
-（lerobot の `lerobot-calibrate` でも、手で書いても構いません）。
-較正されていないと可動域が `0..4095` のままで、offset を計算する材料がありません。
-`so101_calib` はその状態を検出して警告します。
-
-> **★ 手順6でトルクを切ったままにしないでください。**
-> driver v0.2.2 はトルクを入れないので、切ったまま手順7へ進むと
-> **脱力したまま指令だけが送られます**（動かないように見えます）。
-> 電源を入れ直すか、次で入れ直してください。
->
-> ```bash
-> docker compose run --rm so101-follower \
->   ros2 run so101_bringup so101_probe --port /dev/so101_follower --torque-on
-> ```
-
-## 7. 実機: 起動して静止を確認する
-
-**アームの電源を入れ直し、手で支えてから:**
-
-```bash
-docker compose up -d
-
 docker compose exec -it so101-follower /entrypoint.sh \
   ros2 launch so101_bringup follower.launch.py \
-    ros2_control_hardware_type:=real usb_port:=/dev/so101_follower
+    backend:=lerobot \
+    usb_port:=/dev/so101_follower \
+    robot_id:=my_follower
 ```
 
-`torque` 引数（既定 `true`）が `ros2_control` より**前に**トルクを入れます。
-driver v0.2.2 は自分では入れないためです。
-手で動かしながら確認したい場合は `torque:=false`。
+主なlaunch引数は次のとおりです。
 
-```bash
-docker compose exec so101-follower /entrypoint.sh ros2 control list_hardware_components
-docker compose exec so101-follower /entrypoint.sh ros2 topic hz /joint_states     # 約 50 Hz
-```
-
-**まだ何も指令しないでください。** RViz の表示と実物を**2方向から**見比べます。
-すべての関節が数度以内で一致していれば次へ進めます。
-
-> **これは静止状態での見比べです。**「アームを手で動かして RViz が追従するか」を
-> 見るテストではありません。**この時点でトルクは入っているのでアームは手で
-> 動かせません**（ドライバが `on_init` でトルクを入れるため）。
-> 無理に動かすとサーボが抵抗します。
-> 手で動かして確認したい場合は、いったん止めて 6.1 の
-> `so101_probe --torque-off --watch` を使ってください。
-
-ずれている関節があれば、**何度ずれているかを目測して 6.4 の補正**を回します
-（`Δ[tick] = ずれ角[°] × 11.38`）。`wrist_roll` はここでしか合わせられません。
-2〜3 周で収束します。
-
-ずれ量を数値で出すには、RViz を見ずに `/joint_states` を読むほうが正確です。
-
-```bash
-docker compose exec so101-follower /entrypoint.sh \
-  ros2 topic echo /joint_states --once --field position
-docker compose exec so101-follower /entrypoint.sh \
-  ros2 topic echo /joint_states --once --field name
-```
-
-たとえばアームを**URDF ゼロ姿勢**（RViz で全関節 0 のときの形）に近づけて置き、
-そのとき `position` が 0 から離れている分がそのままずれです
-（単位は rad。`Δ[tick] = ずれ[rad] × 651.9`）。
-
-> `/joint_states` の `velocity` は信用できません（後述の既知バグ）。
-> `position` だけを見てください。
-
-## 8. 実機: 1関節ずつ小さく動かす
-
-落下を起こしにくい順に:
-
-**wrist_roll → gripper → wrist_flex → elbow_flex → shoulder_pan → shoulder_lift（最後、必ず手を添える）**
-
-現在の `/joint_states` の値から、**1関節だけ ±0.10 rad** 変えて **4秒かけて**送ります。
-
-```bash
-docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
-  /joint_trajectory_controller/follow_joint_trajectory \
-  control_msgs/action/FollowJointTrajectory \
-  "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_flex_joint, wrist_flex_joint, wrist_roll_joint],
-     points: [{positions: [0.0, 0.0, 0.0, 0.0, 0.10], time_from_start: {sec: 4}}]}}" --feedback
-```
-
-毎回: 向きが RViz と一致するか / 動く量が約 0.10 rad（約 5.7°）か /
-`SUCCEEDED` で返るか / 静止時に唸っていないか、を確認します。
-
-**`time_from_start` は必ず数秒取ってください。** ドライバは書き込みごとに
-`speed=2400`（約 210 deg/s）をハードコードで送るため、大きな位置差を一度に
-指令するとその速度で飛びます。JTC が補間してくれるので細かい差分に分かれる、
-というだけで守られています。
-
-同じ理由で、**`forward_position_controller` は 0.05 rad 以下の微調整以外に
-使わないでください**（補間なしで指令が飛びます）。
-
-向きとゼロ点が全部確認できたら、対話的なツールが使えます。
-
-```bash
-docker compose exec -it so101-follower \
-  ros2 run rqt_joint_trajectory_controller rqt_joint_trajectory_controller
-```
-
-## 9. 実機: 全関節の軌道とグリッパ
-
-ホーム → 控えめな姿勢 → ホーム を各6秒で。RViz が実物に追従することを確認します。
-
-```bash
-docker compose exec so101-follower /entrypoint.sh ros2 action send_goal \
-  /gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand \
-  "{command: {name: [gripper_joint], position: [0.6]}}" --feedback
-```
-
-半開き（0.6）から始め、柔らかいものを掴んで閉じる（0.05）を試します。
-`allow_stalling: true` なので、掴んで止まっても成功で返ります。
-
-## 10. 停止する
-
-**JTC で低く自立する姿勢へ動かしてから** `Ctrl+C` してください。
-
-## 開発中の使い方（設定やコードを頻繁に変える場合）
-
-**リポジトリを正、コンテナを実行環境として使うモードがあります。**
-ワークスペース全体（`ros2_ws/`）をホストからマウントするので、
-編集がそのまま反映され、ビルド成果物もホストに残ります。
-
-```bash
-# 初回だけ（上流の取得とビルド）
-docker compose -f compose.yaml -f compose.dev.yaml run --rm so101-follower \
-  bash /bootstrap.sh
-
-# 以降
-docker compose -f compose.yaml -f compose.dev.yaml up
-```
-
-### 何をしたらどうなるか
-
-| 変更内容 | 必要な操作 |
-| --- | --- |
-| `config/*.xacro`（offset・PID）、`control/`、`launch/`、Python の**編集** | **再起動だけ** |
-| ファイルの**新規追加**、`setup.py` / `package.xml` の変更 | コンテナ内で `colcon build` → 再起動 |
-| `Dockerfile`、apt パッケージ、上流の SHA | `docker compose build` |
-
-ファイルを追加したときのビルド:
-
-```bash
-docker compose exec so101-follower /entrypoint.sh \
-  bash -c "cd /ros2_ws && colcon build --symlink-install --packages-select so101_bringup"
-docker compose -f compose.yaml -f compose.dev.yaml restart
-```
-
-**ビルド成果物はホストの `ros2_ws/{build,install,log}` に残るので、
-`docker compose down` しても消えません**（`.gitignore` 済み）。
-
-### 素の `compose.yaml` との使い分け
-
-| | 中身 | 用途 |
+| 引数 | 既定値 | 用途 |
 | --- | --- | --- |
-| `compose.yaml` のみ | イメージに焼かれたソースと install 空間 | 動作確認、配布。`up` だけで動く |
-| `+ compose.dev.yaml` | ホストの `ros2_ws` | **実機の調整中** |
+| `backend` | `mock` | `mock`または`lerobot` |
+| `usb_port` | `/dev/so101_follower` | 実機のシリアルポート |
+| `robot_id` | 空 | 実機で必須のLeRobot較正ID |
+| `calibration_dir` | `/root/.cache/huggingface/lerobot/calibration/robots/so_follower` | read-only較正ディレクトリ |
+| `start_rviz` | `true` | RViz 2を起動するか |
 
-> 調整が終わったら**必ず commit して `docker compose build`** してください。
-> dev モードのままだと「イメージには古い値、ホストには新しい値」という
-> 食い違いが残ります。
+較正作業は、ROSを停止した状態でLeRobotのコマンドを使用してください。
 
-> アーキテクチャに依存するので、Mac で作った `build/install` を
-> Linux へ持って行っても動きません。**各マシンで一度 bootstrap** してください。
+## ROSインターフェース
 
-## トラブルシュート
-
-### `No such file or directory: /dev/so101_follower`
-
-`ls -l /dev/ttyACM*` で実際のデバイスを確認し `.env` の `SO101_DEVICE` を直します。
-コンテナ起動後に接続した場合は `docker compose down && docker compose up` が必要です。
-
-### `Permission denied`
-
-```bash
-ls -ln /dev/so101_follower
-getent group dialout
-grep DIALOUT_GID .env
-```
-
-デバイスのグループIDと `.env` の `DIALOUT_GID` が一致すること。
-グループ追加後に再ログインしていない場合も反映されません。
-
-### 応答しないモータがある
-
-- アームの電源が入っているか（サーボは USB からは給電されません）
-- デイジーチェーンのコネクタ
-- `so101_probe --scan` で ID ごとの応答を確認（`model 777` が正常）
-
-### 散発的に通信エラーが出る / 突然アームが止まって制御が効かなくなる
-
-read タイムアウトは 5ms しかなく、タイムアウト時のリトライがないため、
-通信エラー1回でハードウェアコンポーネントがエラー状態へ落ちます。
-**トルクは入ったままなのでアームは落ちませんが、その場で固まって指令を
-受け付けなくなります。** 復帰にはスタックの再起動が必要です。
-
-原因の切り分け順:
-
-1. **ModemManager** が接続直後にポートを探っている（最も多い）。
-   `99-so101.rules` を導入したか、`systemctl status ModemManager` を確認
-2. **USBハブ** — カメラなど帯域を食うデバイスと同じハブに挿していないか確認
-   （バスパワーかどうかは関係ありません）。切り分けとして一度直結してみる
-3. ケーブルの品質・長さ、コネクタの接触
-
-### `Command of at least one joint is out of limits` が ERROR で出続ける
-
-**これは正常動作です。** `enforce_command_limits: true` により、URDF の
-`<limit>` を超える指令がクランプされたことを知らせています。故障ではありません。
-関節の速度上限（10 rad/s）に当たった場合も同じログが出ます。
-
-### 軌道が必ず `GOAL_TOLERANCE_VIOLATED` で失敗する
-
-`config/ros2_controllers.yaml` の `stopped_velocity_tolerance` が `0.0` に
-なっているか確認してください。ドライバの velocity が信用できないため
-（後述）、既定値のままだとゴール到達判定が必ず失敗します。
-
-### グリッパのアクションが返ってこない
-
-同じく velocity バグの影響です。`stall_velocity_threshold` を大きく
-（100.0）してあるか確認してください。
-
-### モータの保持力が弱い（特に対話操作で）
-
-**P ゲインを確認してください。** 位置制御のトルクは概ね `P × 位置偏差` です。
+- `/joint_states`
+- `/joint_trajectory_controller/joint_trajectory`
+- `/joint_trajectory_controller/follow_joint_trajectory`
+- `/gripper_controller/gripper_cmd`
+- `/so101/hardware_commands`（内部）
+- `/so101/hardware_states`（内部）
+- `/so101/lerobot_bridge/ready`（起動同期用）
 
 ```bash
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_probe --port /dev/so101_follower --torque
+ros2 run rqt_joint_trajectory_controller rqt_joint_trajectory_controller
+ros2 control list_controllers
 ```
 
-- `send_goal` … 時間軸のある軌道なので指令が実位置を先行し、**偏差が持続** → 力が出る
-- 対話操作 … 指令が実位置に張り付くので **偏差がほぼゼロ** → 力が出ない
+Cartesian jogとキーボード操作の既存launchも、同じJointTrajectoryインターフェースを
+利用します。
 
-**「対話型でだけ弱い」ならこれが原因です。**
+## watchdogと異常時動作
 
-STS3215 の工場出荷値は `P=32` ですが、**lerobot は振動回避のため 16 に下げます**
-（`so_follower.configure()` の `# to avoid shakiness (Default is 32)`）。
-この構成では **32 に戻して**あります
-（`control/so101_follower.ros2_control.xacro` の `so101_p_gain`）。
+Controller Managerは内部コマンドを50 Hzで常時発行します。ブリッジは最初の正常な
+6関節指令を受け取った後、0.5秒のwatchdogを有効化します。次の場合はトルクOFFを
+試み、ブリッジを異常終了させ、launch全体を停止します。
 
-振動する場合は 24 → 20 → 16 と下げてください。
-実機で素早く試すなら、ROS を止めた状態で直接書けます。
+- コマンドが0.5秒以上途絶えた
+- LeRobotの読書きで例外が発生した
+- 不正な値が続き、正常なコマンドを受信できない
+
+NaN、無限値、不足・重複・未知の関節を含む指令は実機へ転送しません。
+
+## 動作確認
+
+実機を接続する前にmock backendでコンテナ、launch、コントローラの起動を
+確認してください。
 
 ```bash
-docker compose down
-docker compose run --rm so101-follower \
-  ros2 run so101_bringup so101_probe --port /dev/so101_follower --set-pid 24
+docker compose build
+docker compose up -d
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 launch so101_bringup follower.launch.py backend:=mock
 ```
 
-> この値は次に ros2_control を起動すると URDF の値で上書きされます。
-> **値を探すための実験用**です。決まったら xacro に書いてください
-> （上記の開発用オーバーレイを使えば再ビルド不要）。
-
-それでも弱い場合は次の2つを疑ってください。
-
-- **電源電圧**。`--scan` の `V` 列を確認。このアームは 7.4V 版サーボ
-  （許容 4.0〜8.0V）で、拘束トルクは概ね電圧比例です。
-  実測 4.9V なら定格の約 66%、7.4V にすれば約 1.5 倍になります
-  （**8.0V を超えないこと**）
-- **グリッパだけ弱い場合**は `Max_Torque_Limit`。lerobot が焼損防止のため
-  グリッパのみ 500（最大 1000 の 50%）を EEPROM に書きます。
-  driver v0.2.2 はこのレジスタを触らないので、その値が残っています
-
-### RViz に SO-101 ではなく別のロボットが表示される
-
-**別の ROS 2 スタックと DDS で混信しています。**
-
-`docker/` 以下の各構成は `network_mode: host` かつ `ROS_DOMAIN_ID` の既定が
-**すべて 0** です。そのため LeKiwi ベースや RPLIDAR のコンテナが同時に動いていると、
-`/robot_description` と `/tf` を複数のノードが publish し、
-RViz がどちらを掴むか決まらなくなります。
+別の端末から、コントローラと関節状態を確認します。
 
 ```bash
-docker ps                                  # 他のコンテナが動いていないか
-docker compose exec so101-follower /entrypoint.sh ros2 node list
-docker compose exec so101-follower /entrypoint.sh \
-  ros2 topic info /robot_description --verbose | grep "Node name"
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 control list_controllers
+docker compose exec -it so101-follower /entrypoint.sh \
+  ros2 topic echo /joint_states --once
 ```
-
-`/robot_description` の publisher が 2 個以上あれば確定です。
-
-対処は2つ。
-
-```bash
-# A) 他方を止める
-docker rm -f lekiwi-base rplidar-a1
-
-# B) ドメインを分けて共存させる
-ROS_DOMAIN_ID=41 docker compose up
-```
-
-> **同じ LAN 上の別マシン**で動かしている場合も混信します。
-> DDS のマルチキャスト探索はマシンをまたぐためです。
-> 複数人が同じネットワークで作業する場合は、各自 `.env` の `ROS_DOMAIN_ID` を
-> 変えてください（0〜232）。
-
-### RViz にモデルは出るが、スライダで動かせない
-
-`view_description.launch.py` を使った場合、`joint_state_publisher_gui` が
-Qt を初期化できずに落ちている可能性が高いです。**RViz は別プロセスなので
-生き残る**ため、「モデルは見えるのに動かない」という症状になります。
-
-```bash
-# jsp_gui が生きているか
-docker compose exec so101-follower /entrypoint.sh ros2 node list | grep joint_state_publisher
-# launch のログに "no Qt platform plugin could be initialized" が出ていないか
-```
-
-URDF と `robot_state_publisher` 自体は無関係です（切り分けは下記）。
-
-```bash
-# GUI を使わずに /joint_states を出して TF が動くか確認する
-docker compose exec so101-follower /entrypoint.sh ros2 run joint_state_publisher joint_state_publisher &
-docker compose exec so101-follower /entrypoint.sh ros2 run tf2_ros tf2_echo base_link shoulder_link
-```
-
-TF が出るなら配管は正常なので、6.1 の `send_goal` 方式に切り替えてください。
-
-### RVizが開かない／QtまたはGLXエラー
-
-```bash
-echo "$DISPLAY"; ls -l /tmp/.X11-unix; xhost
-```
-
-`xhost +si:localuser:root` をデスクトップにログインしているユーザーの端末から
-再実行してください。設定変更後は `docker compose down && docker compose up -d --force-recreate`。
-
-## 既知の問題（上流）
-
-### 1. ドライバの velocity が符号を復号していない
-
-`feetech_ros2_driver` v0.2.2 の `read()` は `Present_Speed`（reg 58、
-sign-magnitude 符号ビット15）をそのまま使っており、**負方向の速度が
-約 +50 rad/s と読めます**。
-
-- `/joint_states` の `velocity` は信用できません（`position` のみ）
-- `config/ros2_controllers.yaml` の `stopped_velocity_tolerance: 0.0` と
-  `stall_velocity_threshold: 100.0` は**この回避策**であって好みの設定ではありません
-
-### 4. 通信エラーからの自動復帰が無い
-
-read タイムアウトは 5ms で、タイムアウト時のリトライがありません。
-1回でも失敗すると `read()` が ERROR を返し、ハードウェアコンポーネントが
-エラー状態へ遷移して制御が切れます（`component.error()` が呼ばれる経路で、
-`on_deactivate()` は通りません）。
-
-**このときトルクは切れません。** STS3215 にコマンドウォッチドッグは無いので、
-サーボは最後の指令位置を保持し続けます。アームは落ちませんが固まります。
-復帰には launch の再起動が必要です（`Ctrl+C` してから launch し直す）。
-
-ModemManager 対策と USB 接続の品質が効くのはこのためです。
-
-### 2. 上流の ros2_control xacro に3つのバグがある
-
-`so_arm101_description/control/so_arm101.ros2_control.xacro` には:
-
-1. `<param name="offset">` — ドライバ側で**非推奨・無視される**
-2. `p_cofficient`（`e` 抜けの綴り間違い）— **PID 値が一切書き込まれない**
-3. `joint_config_file` が無い — **較正 YAML を渡す口が無い**
-
-このため `so101_bringup/control/so101_follower.ros2_control.xacro` で
-丸ごと差し替えています（親 xacro の `ros2_control_file:=` 引数を使うので
-URDF 本体はフォークしていません）。ビルド時にこれらが混入していないことを
-自動検査しています。
-
-### 3. 速度・加速度がハードコード
-
-`write()` は毎回 `speed=2400, accel=50` を送ります（設定不可）。
-`time_from_start` を長めに取る必要があるのはこのためです。
-
-## ファイル構成
-
-- `Dockerfile`: ROS 2 Jazzy、feetech_ros2_driver（apt）、上流の取り込み、ビルド時検査
-- `compose.yaml`: シリアルデバイス、ホストネットワーク、X11。停止シグナルの扱い
-- `99-so101.rules`: `ATTRS{serial}` による `/dev/so101_follower` 固定、ModemManager 除外
-- `../../ros2_ws/so101_upstream.repos`: 上流 `ros2_so_arm` のコミット固定
-- `../../ros2_ws/src/so101_bringup`: launch、コントローラ設定、ros2_control xacro、較正ツール
-
-上流: https://github.com/ros-physical-ai/ros2_so_arm
-ドライバ: https://github.com/ros-physical-ai/feetech_ros2_driver
-SO-101 本体: https://github.com/TheRobotStudio/SO-ARM100

@@ -20,13 +20,12 @@ setup(
     zip_safe=True,
     maintainer="maintainer",
     maintainer_email="maintainer@example.com",
-    description="Bringup and calibration tools for the standalone SO-101 follower arm.",
+    description="LeRobot-backed ROS 2 bringup for the standalone SO-101 follower arm.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "so101_probe = so101_bringup.sts_probe:main",
-            "so101_calib = so101_bringup.lerobot_calib:main",
+            "so101_lerobot_bridge = so101_bringup.lerobot_bridge:main",
             "so101_keyboard_input = so101_bringup.keyboard_input:main",
             "so101_cartesian_jog = so101_bringup.cartesian_jog:main",
         ],

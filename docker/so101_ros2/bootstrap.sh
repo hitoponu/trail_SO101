@@ -34,7 +34,7 @@ echo "== 完了 =="
 echo "以降は次で起動できます:"
 echo "  docker compose -f compose.yaml -f compose.dev.yaml up"
 echo
-echo "設定 (config/*.xacro など) を編集したら再起動するだけで反映されます。"
+echo "設定やPythonコードを編集したら再起動するだけで反映されます。"
 echo "ファイルを追加した場合だけ、コンテナ内で colcon build してください:"
 echo "  docker compose exec so101-follower /entrypoint.sh \\"
 echo "    bash -c 'cd /ros2_ws && colcon build --symlink-install --packages-select so101_bringup'"

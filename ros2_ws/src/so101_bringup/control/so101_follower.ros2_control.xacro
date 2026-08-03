@@ -1,105 +1,34 @@
 <?xml version="1.0" ?>
 <!--
-  SO-101 follower 用の ros2_control 記述。
-
-  ★★★ 対象は apt の feetech_ros2_driver **v0.2.2**。GitHub の main とは別物。★★★
-
-  ■ v0.2.2 と main の違い（実機で判明。ここを取り違えると全関節が π rad ずれる）
-
-  機能                  apt v0.2.2                    GitHub main
-  ....................  ............................  ............................
-  中心値の扱い          per-joint の `offset`         `kStsMidpoint`(2048) 固定
-  `offset`              必須。無いと 0 になる         非推奨・無視される
-  PID の綴り            `p_cofficient`（e 抜け）      `p_coefficient`
-  `joint_config_file`   無い                          ある
-  `homing_offset`       無い                          ある（EEPROM へ書く）
-  `range_min/max`       無い                          ある（EEPROM へ書く）
-
-  v0.2.2 の read/write は
-      read : q   = to_radians(Present - offset)
-      write: tick = from_radians(q) + offset
-  なので **`offset` = URDF ゼロ姿勢における Present の tick 値**。
-
-  `offset` を書かないと 0 になり、`q = Present * 2π/4096` すなわち
-  全関節が **+π rad** ずれる。RViz が不可能な姿勢になり、
-  `joint_limiter_interface` が limit 超過で例外を投げてコントローラが落ちる。
-
-  ■ v0.2.2 では EEPROM を書き換えない
-  `offset` は純粋なソフト側の値で、サーボの EEPROM には触らない。
-  較正値（homing_offset / range）は lerobot が書いたものがそのまま残り、
-  この構成からは変更されない。**壊す心配が無いのは利点。**
-
-  ■ offset の値
-  `config/so101_offsets.xacro` に分離してある。機体ごとの較正値なのでそちら参照。
+  ros2_control only sees ROS JointState topics. All hardware communication,
+  calibration and motor configuration belongs to the LeRobot bridge.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-
-  <!-- 機体ごとの offset（URDF ゼロにおける Present tick）-->
-  <xacro:include filename="$(find so101_bringup)/config/so101_offsets.xacro"/>
-
-  <!--
-    ★ サーボの PID。ここが「保持力の強さ」を決める調整ノブ。
-
-    位置制御のトルクは概ね `P × 位置偏差` なので、P が小さいと
-    **偏差が小さい場面で力が出ない**。
-      send_goal … 時間軸のある軌道で指令が実位置を先行 → 偏差が持続 → 力が出る
-      対話操作  … 指令が実位置に張り付く → 偏差ほぼゼロ → 力が出ない
-    「対話型でだけ弱い」のはこれが原因。
-
-    STS3215 の工場出荷値は P=32。lerobot は so_follower.configure() で
-    振動(shakiness)回避のため 16 へ下げているが、そのぶん保持力が落ちる。
-    ここでは **工場出荷値の 32 に戻している**。
-
-    振動する場合は 24 → 20 → 16 と下げること。
-    実機で素早く試すには so101_probe の set_pid オプションが使える
-    (docker/so101_ros2/README.md 参照)。値が決まったらここへ書き戻す。
-  -->
-  <xacro:property name="so101_p_gain" value="32"/>
-  <xacro:property name="so101_i_gain" value="0"/>
-  <xacro:property name="so101_d_gain" value="32"/>
-
-  <xacro:macro
-    name="ros2_control"
-    params="prefix ros2_control_hardware_type usb_port"
-  >
+  <!-- The upstream description calls this macro with these legacy arguments. -->
+  <xacro:macro name="ros2_control" params="prefix ros2_control_hardware_type usb_port">
     <ros2_control name="SO_ARM101" type="system">
       <hardware>
-        <xacro:if value="${ros2_control_hardware_type == 'mock_components'}">
-          <!-- 実機に一切触れないドライラン用。全関節ゼロから始まる。 -->
-          <plugin>mock_components/GenericSystem</plugin>
-        </xacro:if>
-        <xacro:if value="${ros2_control_hardware_type == 'real'}">
-          <plugin>feetech_ros2_driver/FeetechHardwareInterface</plugin>
-          <param name="usb_port">${usb_port}</param>
-        </xacro:if>
+        <plugin>joint_state_topic_hardware_interface/JointStateTopicSystem</plugin>
+        <param name="joint_commands_topic">/so101/hardware_commands</param>
+        <param name="joint_states_topic">/so101/hardware_states</param>
+        <!-- Required for the bridge watchdog even while the arm is stationary. -->
+        <param name="trigger_joint_command_threshold">-1</param>
       </hardware>
 
-      <!--
-        PID の綴りは v0.2.2 に合わせて **わざと "cofficient"**（e 抜け）にしてある。
-        正しい綴りに直すと v0.2.2 は読まず、PID が一切設定されない。
-        driver を main 系へ上げるときは同時に直すこと。
-      -->
-      <xacro:macro name="sts_joint"
-                   params="name id offset
-                           p:=${so101_p_gain} i:=${so101_i_gain} d:=${so101_d_gain}">
+      <xacro:macro name="position_joint" params="name">
         <joint name="${prefix}${name}">
-          <param name="id">${id}</param>
-          <param name="offset">${offset}</param>
-          <param name="p_cofficient">${p}</param>
-          <param name="i_cofficient">${i}</param>
-          <param name="d_cofficient">${d}</param>
           <command_interface name="position"/>
           <state_interface name="position"/>
           <state_interface name="velocity"/>
         </joint>
       </xacro:macro>
 
-      <xacro:sts_joint name="shoulder_pan_joint"  id="1" offset="${so101_offset_shoulder_pan}"/>
-      <xacro:sts_joint name="shoulder_lift_joint" id="2" offset="${so101_offset_shoulder_lift}"/>
-      <xacro:sts_joint name="elbow_flex_joint"    id="3" offset="${so101_offset_elbow_flex}"/>
-      <xacro:sts_joint name="wrist_flex_joint"    id="4" offset="${so101_offset_wrist_flex}"/>
-      <xacro:sts_joint name="wrist_roll_joint"    id="5" offset="${so101_offset_wrist_roll}"/>
-      <xacro:sts_joint name="gripper_joint"       id="6" offset="${so101_offset_gripper}"/>
+      <xacro:position_joint name="shoulder_pan_joint"/>
+      <xacro:position_joint name="shoulder_lift_joint"/>
+      <xacro:position_joint name="elbow_flex_joint"/>
+      <xacro:position_joint name="wrist_flex_joint"/>
+      <xacro:position_joint name="wrist_roll_joint"/>
+      <xacro:position_joint name="gripper_joint"/>
     </ros2_control>
   </xacro:macro>
 </robot>

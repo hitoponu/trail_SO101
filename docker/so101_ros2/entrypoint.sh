@@ -20,6 +20,5 @@ if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
 fi
 
 # exec はシグナル伝達に必須。この後に処理を足さないこと。
-# SIGINT が controller_manager に届かないと on_deactivate が走らず、
-# シリアルポートが開いたままトルクが入った状態でコンテナが消える。
+# SIGINT must reach the bridge so LeRobot can disable torque and close serial.
 exec "$@"

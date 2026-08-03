@@ -1,192 +1,165 @@
-"""SO-101 follower アームの起動。
-
-**このファイルが起動の主体。** `docker compose up` はコンテナを待機させるだけで、
-ROS ノードも RViz もトルクも扱わない。
-
-    # モックでのドライラン（シリアルを一切開かない。既定）
-    ros2 launch so101_bringup follower.launch.py
-
-    # 実機
-    ros2 launch so101_bringup follower.launch.py \\
-        ros2_control_hardware_type:=real usb_port:=/dev/so101_follower
-
-★ 既定が mock_components なのは意図的。引数なしでは実機に触れない。
-
-■ torque 引数（既定 true）
-
-driver v0.2.2 は **トルクを入れない**（`set_torque(true)` を一度も呼ばない）。
-トルクはサーボの電源投入時の状態のままになるので、
-`so101_probe --torque-off` の後に起動すると脱力したまま指令だけが送られる
-（「動かない」ように見える）。
-
-そこでこの launch は `ros2_control` を起動する**前に**トルクを操作する。
-同じシリアルポートを二重に開かないよう、前処理の終了を待ってから制御を上げる。
-
-    torque:=true  （既定）… トルクを**入れる**
-    torque:=false        … トルクを**切る**（手で動かしながら TF を見たいとき）
-
-★ `torque:=false` は「入れない」ではなく「切る」。driver はトルクを触らないので、
-  「入れないだけ」にすると電源投入時の状態（通常 ON）が残り、固いままになる。
-
-    ros2 launch so101_bringup follower.launch.py \\
-        ros2_control_hardware_type:=real torque:=false
-
-■ 関節を動かす
-
-    ros2 run rqt_joint_trajectory_controller rqt_joint_trajectory_controller
-"""
+"""Launch the SO-101 with ros2_control over a thin LeRobot bridge."""
 
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
-from launch.conditions import IfCondition, UnlessCondition
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    ExecuteProcess,
+    RegisterEventHandler,
+)
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import Command, LaunchConfiguration, PythonExpression
+from launch.events import Shutdown
+from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    hardware_type = LaunchConfiguration("ros2_control_hardware_type")
+    backend = LaunchConfiguration("backend")
     usb_port = LaunchConfiguration("usb_port")
+    robot_id = LaunchConfiguration("robot_id")
+    calibration_dir = LaunchConfiguration("calibration_dir")
     controllers_file = LaunchConfiguration("controllers_file")
     start_rviz = LaunchConfiguration("start_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
-    torque = LaunchConfiguration("torque")
 
     bringup_share = Path(get_package_share_directory("so101_bringup"))
     description_share = Path(get_package_share_directory("so_arm101_description"))
-
     xacro_file = description_share / "urdf" / "so_arm101.urdf.xacro"
-    # ★ 上流の ros2_control xacro は使わない。
-    #   上流のものは GitHub main 系の書き方 (offset は非推奨、p_coefficient) だが、
-    #   apt で入る driver は v0.2.2 で意味が違う (offset が必須、p_cofficient)。
-    #   親 xacro の ros2_control_file 引数で自前のものへ差し替える。
-    #   詳細は control/so101_follower.ros2_control.xacro の冒頭コメント。
-    ros2_control_file = bringup_share / "control" / "so101_follower.ros2_control.xacro"
+    control_file = bringup_share / "control" / "so101_follower.ros2_control.xacro"
 
-    # 実機のときだけトルクを操作する。mock ではシリアルを開かないので不要。
-    #
-    # ★ torque:=false は「入れない」ではなく **「切る」**。
-    #   driver v0.2.2 はトルクを一切触らない (on_deactivate で切るだけ) ので、
-    #   「入れないだけ」にすると電源投入時の状態 (通常 ON) がそのまま残り、
-    #   torque:=false にしてもアームは固いままになる。
-    is_real = PythonExpression(["'", hardware_type, "' == 'real'"])
-    torque_flag = PythonExpression([
-        "'--torque-on' if '", torque, "' == 'true' else '--torque-off'",
-    ])
-
-    # ParameterValue(..., value_type=str) は Jazzy では必須。
-    # 無いと Command の出力が文字列として扱われず robot_state_publisher が落ちる。
+    # The upstream description still requires legacy xacro argument names. The
+    # selected control file ignores their values and always uses the ROS topic
+    # hardware adapter; backend selection belongs only to the bridge.
     robot_description = ParameterValue(
-        Command([
-            "xacro ", str(xacro_file),
-            " ros2_control_hardware_type:=", hardware_type,
-            " usb_port:=", usb_port,
-            " ros2_control_file:=", str(ros2_control_file),
-        ]),
+        Command(
+            [
+                "xacro ",
+                str(xacro_file),
+                " ros2_control_hardware_type:=real",
+                " usb_port:=",
+                usb_port,
+                " ros2_control_file:=",
+                str(control_file),
+            ]
+        ),
         value_type=str,
     )
 
-    def make_control_node(condition=None):
-        # 同一の Node インスタンスを LaunchDescription の2箇所へ入れられないので、
-        # トルク前処理の有無それぞれに1つずつ生成する。
-        return Node(
-            package="controller_manager",
-            executable="ros2_control_node",
-            output="screen",
-            parameters=[controllers_file],
-            # Jazzy の controller_manager はこの remap でロボット記述を受け取る
-            remappings=[("~/robot_description", "/robot_description")],
-            condition=condition,
-        )
+    bridge = Node(
+        package="so101_bringup",
+        executable="so101_lerobot_bridge",
+        name="lerobot_bridge",
+        output="screen",
+        parameters=[
+            {
+                "backend": backend,
+                "usb_port": usb_port,
+                "robot_id": robot_id,
+                "calibration_dir": calibration_dir,
+                "robot_description": robot_description,
+                "update_rate": 50.0,
+                "command_timeout": 0.5,
+            }
+        ],
+    )
 
-    def spawner(name, *extra):
+    control_node = Node(
+        package="controller_manager",
+        executable="ros2_control_node",
+        output="screen",
+        parameters=[controllers_file],
+        remappings=[("~/robot_description", "/robot_description")],
+    )
+
+    def spawner(name):
         return Node(
             package="controller_manager",
             executable="spawner",
-            arguments=[name, "--controller-manager", "/controller_manager", *extra],
+            arguments=[name, "--controller-manager", "/controller_manager"],
             output="screen",
         )
 
-    # joint_state_broadcaster を先に上げ、その終了を待って他を上げる。
-    # 同時に spawn すると controller_manager が取り合って失敗することがある。
     jsb = spawner("joint_state_broadcaster")
     jtc = spawner("joint_trajectory_controller")
-    grip = spawner("gripper_controller")
-    # JTC と同じ command interface を要求するので inactive で置いておく。
-    # 有効化すると補間なしで指令が飛ぶ (driver の速度は 2400 ≒ 210 deg/s 固定)。
-    fwd = spawner("forward_position_controller", "--inactive")
+    gripper = spawner("gripper_controller")
 
-    # ★ ros2_control より **先に** 実行し、終了を待ってから制御を上げる。
-    #   同じシリアルポートを二重に開かないため。
-    #
-    # ★★ Node ではなく ExecuteProcess を使うこと。★★
-    #   so101_probe は ROS ノードではなく素の argparse スクリプトなので、
-    #   launch_ros.actions.Node を使うと `--ros-args -r __node:=...` が
-    #   自動で付き、argparse が
-    #     error: unrecognized arguments: --ros-args -r __node:=so101_torque_on
-    #   で終了する。トルクが入らないまま制御だけ上がってしまう。
-    torque_step = ExecuteProcess(
-        cmd=["ros2", "run", "so101_bringup", "so101_probe",
-             "--port", usb_port, torque_flag],
-        condition=IfCondition(is_real),
+    # `ros2 service call` waits for the service to appear. The service is
+    # created only after calibration validation and backend connection finish.
+    wait_for_bridge = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "service",
+            "call",
+            "/so101/lerobot_bridge/ready",
+            "std_srvs/srv/Trigger",
+            "{}",
+        ],
         output="screen",
     )
 
-    return LaunchDescription([
-        DeclareLaunchArgument(
-            "ros2_control_hardware_type",
-            default_value="mock_components",
-            description="mock_components: 実機に触れないドライラン / real: 実機",
-        ),
-        DeclareLaunchArgument("usb_port", default_value="/dev/so101_follower"),
-        DeclareLaunchArgument(
-            "torque",
-            default_value="true",
-            description="起動前にトルクを入れるか。driver v0.2.2 は自分では入れない",
-        ),
-        DeclareLaunchArgument(
-            "controllers_file",
-            default_value=str(bringup_share / "config" / "ros2_controllers.yaml"),
-        ),
-        DeclareLaunchArgument("start_rviz", default_value="true"),
-        DeclareLaunchArgument(
-            "rviz_config",
-            # 上流の RViz 設定をそのまま使う (Grid + RobotModel + TF)
-            default_value=str(description_share / "rviz" / "config.rviz"),
-        ),
-
-        Node(
-            package="robot_state_publisher",
-            executable="robot_state_publisher",
-            name="robot_state_publisher",
-            output="screen",
-            parameters=[{"robot_description": robot_description}],
-        ),
-
-        # 実機: トルク操作の終了を待ってから ros2_control を起動する
-        torque_step,
-        RegisterEventHandler(
-            OnProcessExit(target_action=torque_step, on_exit=[make_control_node()]),
-            condition=IfCondition(is_real),
-        ),
-        # mock: 前処理が無いのですぐ起動する
-        make_control_node(condition=UnlessCondition(is_real)),
-
-        jsb,
-        RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[jtc])),
-        RegisterEventHandler(OnProcessExit(target_action=jtc, on_exit=[grip])),
-        RegisterEventHandler(OnProcessExit(target_action=grip, on_exit=[fwd])),
-
-        Node(
-            package="rviz2",
-            executable="rviz2",
-            name="rviz2",
-            arguments=["-d", rviz_config],
-            condition=IfCondition(start_rviz),
-            output="screen",
-        ),
-    ])
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument(
+                "backend",
+                default_value="mock",
+                description="mock: no serial access / lerobot: physical SO-101",
+            ),
+            DeclareLaunchArgument("usb_port", default_value="/dev/so101_follower"),
+            DeclareLaunchArgument(
+                "robot_id",
+                default_value="",
+                description="LeRobot calibration ID; required for backend:=lerobot",
+            ),
+            DeclareLaunchArgument(
+                "calibration_dir",
+                default_value=(
+                    "/root/.cache/huggingface/lerobot/calibration/robots/so_follower"
+                ),
+            ),
+            DeclareLaunchArgument(
+                "controllers_file",
+                default_value=str(bringup_share / "config" / "ros2_controllers.yaml"),
+            ),
+            DeclareLaunchArgument("start_rviz", default_value="true"),
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value=str(description_share / "rviz" / "config.rviz"),
+            ),
+            Node(
+                package="robot_state_publisher",
+                executable="robot_state_publisher",
+                name="robot_state_publisher",
+                output="screen",
+                parameters=[{"robot_description": robot_description}],
+            ),
+            bridge,
+            wait_for_bridge,
+            RegisterEventHandler(
+                OnProcessExit(target_action=wait_for_bridge, on_exit=[control_node])
+            ),
+            # Spawners wait for controller_manager, then are serialized to avoid
+            # competing load/configure requests during startup.
+            jsb,
+            RegisterEventHandler(OnProcessExit(target_action=jsb, on_exit=[jtc])),
+            RegisterEventHandler(OnProcessExit(target_action=jtc, on_exit=[gripper])),
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=bridge,
+                    on_exit=[EmitEvent(event=Shutdown(reason="LeRobot bridge exited"))],
+                )
+            ),
+            Node(
+                package="rviz2",
+                executable="rviz2",
+                name="rviz2",
+                arguments=["-d", rviz_config],
+                condition=IfCondition(start_rviz),
+                output="screen",
+            ),
+        ]
+    )
