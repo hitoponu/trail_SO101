@@ -147,6 +147,20 @@ def generate_launch_description():
             ],
         ),
 
+        # ★ scan_filter が無いと SLAM も costmap も一切データを受け取れない。
+        #   fake_scan が出すのは /scan だが、slam_toolbox.yaml の scan_topic も
+        #   nav2.yaml の costmap も /scan_filtered を読む。この 1 ノードが
+        #   欠けていると /scan_filtered は publisher 0 / subscriber 3 になり、
+        #   map -> odom が永遠に出ず、Nav2 は "Invalid frame ID map" を
+        #   INFO で吐き続ける (エラーではないので気付きにくい)。
+        #   nav.launch.py と nav_with_map.launch.py には元からある。
+        Node(
+            package="lekiwi_base_bringup",
+            executable="scan_filter",
+            name="scan_angular_filter",
+            output="screen",
+        ),
+
         # ★ slam_toolbox は Jazzy では LifecycleNode。ふつうの Node として起動すると
         #   unconfigured のまま止まり、map → odom の TF が出ないので Nav2 が
         #   "Invalid frame ID map" を吐き続ける (エラーではなく INFO なので気付きにくい)。

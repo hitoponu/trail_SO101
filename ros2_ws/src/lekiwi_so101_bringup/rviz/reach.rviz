@@ -1,0 +1,107 @@
+# LeKiwi + SO-101 リーチ用の RViz 設定。
+#
+# ★ Fixed Frame は map。
+#   "Publish Point" ツールは Fixed Frame の座標で PointStamped を出すので、
+#   ここが odom や base_link だとリーチノードに REJECTED_WRONG_FRAME で弾かれる。
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Reach Target1
+      Splitter Ratio: 0.5
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+      Plane Cell Count: 20
+      Color: 160; 160; 164
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Topic:
+        Value: /robot_description
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 1
+      Visual Enabled: true
+      Collision Enabled: false
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Show Arrows: false
+      Marker Scale: 0.3
+    - Class: rviz_default_plugins/Map
+      Name: Map
+      Enabled: true
+      Topic:
+        Value: /map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.7
+    - Class: rviz_default_plugins/LaserScan
+      Name: Scan (filtered)
+      Enabled: true
+      Topic:
+        Value: /scan_filtered
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Size (m): 0.02
+      Style: Points
+      Color: 255; 85; 0
+      Color Transformer: FlatColor
+    # リーチ目標。緑 = 受理、赤 = 棄却。
+    - Class: rviz_default_plugins/Marker
+      Name: Reach Target
+      Enabled: true
+      Topic:
+        Value: /so101/reach_markers
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+  Global Options:
+    Fixed Frame: map
+    Background Color: 48; 48; 48
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+    # ★ これがリーチ目標の入力。PointStamped を /clicked_point へ出す。
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Value: /clicked_point
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 2.5
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0.1
+      Pitch: 0.55
+      Yaw: 2.4
+      Target Frame: base_link
+Window Geometry:
+  Height: 900
+  Width: 1400
+  Displays:
+    collapsed: false

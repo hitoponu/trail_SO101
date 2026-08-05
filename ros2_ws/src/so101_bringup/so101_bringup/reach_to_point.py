@@ -65,7 +65,14 @@ class ReachToPoint(Node):
             "expected_frame": "map",
             "tf_timeout": 0.5,
             "tf_max_age": 1.0,
-            "max_reach_radius": 0.30,
+            # Cheap sanity guard only: skip 200 solver iterations to say
+            # "obviously no" for a target metres away. Measured envelope from
+            # arm_base_link is 0.007-0.543 m (grid over the joint limits with
+            # the 0.10 rad margin), and the zero pose alone sits at 0.452 m,
+            # so anything under ~0.55 would reject genuinely reachable points.
+            # This is NOT a tipping guard - a radius cannot tell a safe pose
+            # from a tippy one. Use joint_limit_overrides for that.
+            "max_reach_radius": 0.55,
             "z_floor": 0.02,
             "floor_frame": "base_footprint",
             "min_command_interval": 1.0,

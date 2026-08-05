@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-ros2-control \
       ros-jazzy-rqt-joint-trajectory-controller \
       ros-jazzy-rviz2 \
+      ros-jazzy-tf2-geometry-msgs \
       ros-jazzy-tf2-ros \
       ros-jazzy-tf2-tools \
       ros-jazzy-xacro \
@@ -48,6 +49,20 @@ RUN mkdir -p src && vcs import src < /tmp/so101_upstream.repos
 
 COPY ros2_ws/src/so101_bringup src/so101_bringup
 
+# LeKiwi ベースにアームを載せた結合構成。
+#
+# ★ 小さい方を大きい方へコピーする。逆はしない。
+#   lekiwi_description は基本図形のみで約 20KB、依存 (urdf/xacro/
+#   robot_state_publisher) もこのイメージに既に入っている。対して
+#   so_arm101_description はメッシュ 16MB + vcs import + so_arm_utils の
+#   回避策を伴うので、ベース側のイメージへ持ち込むと高くつく。
+#
+# この 2 つが入ることで、結合ロボットの robot_state_publisher と RViz を
+# **このコンテナだけ**が持てる。ベース側コンテナはアームの記述を必要としない
+# (slam_toolbox と Nav2 は TF / scan / odom しか見ない)。
+COPY ros2_ws/src/lekiwi_description src/lekiwi_description
+COPY ros2_ws/src/lekiwi_so101_bringup src/lekiwi_so101_bringup
+
 # so_arm100_* は 5-DoF の別機種、so_arm_gz は gz_ros2_control が必要なので外す。
 #
 # so_arm_utils は上流 launch 専用でこちらでは使わないが、**ビルドは必要**。
@@ -62,7 +77,8 @@ COPY ros2_ws/src/so101_bringup src/so101_bringup
 # 上流 launch のための依存であり、こちらは自前の launch を使うので不要。
 RUN . /opt/ros/jazzy/setup.sh \
     && colcon build --symlink-install \
-         --packages-select so_arm_utils so_arm101_description so101_bringup
+         --packages-select so_arm_utils so_arm101_description so101_bringup \
+                          lekiwi_description lekiwi_so101_bringup
 
 # Hardware communication, calibration and motor configuration all come from
 # LeRobot. Do not add a direct Feetech SDK or feetech_ros2_driver dependency.
@@ -92,6 +108,33 @@ RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
     && python3 -c "import yaml,sys; d=yaml.safe_load(open('$B/config/ros2_controllers.yaml')); \
                    j=d['joint_trajectory_controller']['ros__parameters']['joints']; \
                    sys.exit(0 if len(j)==5 and 'gripper_joint' not in j else 1)"
+
+# 結合ロボット (LeKiwi ベース + SO-101 アーム) の静的検査。
+#
+#   * ルートリンクが base_footprint ただ 1 つであること。
+#     so_arm101.urdf.xacro (トップレベル) を誤って include すると world リンクが
+#     増えてルートが 2 つになり、check_urdf ではなく RViz で初めて気付くことになる。
+#   * リンク名が衝突しないこと。アームに接頭辞を付けないと base_link が二重に
+#     定義され、URDF パーサはどちらかを黙って捨てる。
+#   * 関節名が arm_ 接頭辞付きで、controllers 設定と一致すること。
+RUN . /opt/ros/jazzy/setup.sh && . /ros2_ws/install/setup.sh \
+    && C="$(ros2 pkg prefix lekiwi_so101_bringup)/share/lekiwi_so101_bringup" \
+    && xacro "$C/urdf/lekiwi_so101.urdf.xacro" > /tmp/combined.urdf \
+    && check_urdf /tmp/combined.urdf | grep -q '^root Link: base_footprint' \
+    && python3 -c "\
+import sys, yaml, xml.etree.ElementTree as ET; \
+r = ET.parse('/tmp/combined.urdf').getroot(); \
+links = [e.get('name') for e in r.findall('link')]; \
+dup = sorted({n for n in links if links.count(n) > 1}); \
+sys.exit('duplicate links: %s' % dup) if dup else None; \
+joints = {e.get('name') for e in r.findall('joint')}; \
+d = yaml.safe_load(open('$C/config/ros2_controllers.yaml')); \
+want = set(d['joint_trajectory_controller']['ros__parameters']['joints']) \
+       | {d['gripper_controller']['ros__parameters']['joint']}; \
+sys.exit('controllers reference missing joints: %s' % sorted(want - joints)) \
+    if want - joints else None; \
+sys.exit(0 if {'arm_base_link', 'arm_gripper_frame_link', 'base_footprint'} <= set(links) else 'expected links missing')" \
+    && python3 -c "from so101_bringup import reach_solver, reach_to_point"
 
 COPY docker/so101_ros2/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

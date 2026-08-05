@@ -20,6 +20,7 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
 
@@ -33,7 +34,21 @@ class ScanFilter(Node):
         self._a_min = math.radians(self.get_parameter("angle_min_deg").value)
         self._a_max = math.radians(self.get_parameter("angle_max_deg").value)
 
-        self._sub = self.create_subscription(LaserScan, "scan", self._cb, 10)
+        # ★ 購読は BEST_EFFORT (qos_profile_sensor_data) にすること。
+        #   depth=10 の既定は RELIABLE で、BEST_EFFORT の publisher からは
+        #   **1 メッセージも受け取れない**。fake_scan は sensor_data QoS
+        #   (= BEST_EFFORT) で出すので、RELIABLE のままだと sim_nav で
+        #   /scan_filtered が publisher 1 / データ 0 という状態になり、
+        #   slam_toolbox が map -> odom を永遠に出さない。
+        #   RELIABLE な publisher (sllidar_node) からは BEST_EFFORT でも
+        #   受け取れるので、こちらにしておけば実機・模擬の両方で動く。
+        #
+        #   配信側は逆に RELIABLE のままにする。RELIABLE な publisher は
+        #   BEST_EFFORT の購読者にも RELIABLE の購読者にも届くので、
+        #   Nav2 の costmap がどちらで購読していても互換になる。
+        self._sub = self.create_subscription(
+            LaserScan, "scan", self._cb, qos_profile_sensor_data
+        )
         self._pub = self.create_publisher(LaserScan, "scan_filtered", 10)
 
         self.get_logger().info(
