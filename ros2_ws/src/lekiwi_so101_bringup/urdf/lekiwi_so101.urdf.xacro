@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<!--
+  LeKiwi ベース + SO-101 アームの結合記述。
+
+  ■ 接頭辞の方針
+  ベースは素の名前 (prefix="")、アームだけ arm_ を付ける。
+  base_link / base_footprint は REP-105 の予約名で、slam_toolbox.yaml /
+  nav2.yaml / base.yaml / base_driver.py / fake_scan.yaml / nav.launch.py に
+  ハードコードされている。ベース側に接頭辞を付けると 2 サブシステム 12 ファイルに
+  波及するが、アーム側なら 4 ファイルで済む。
+
+  ■ 上流マクロは prefix を「関節名にも」適用する
+  したがって関節は arm_shoulder_pan_joint … arm_gripper_joint になる。
+  config/ros2_controllers.yaml と launch の joint_prefix:=arm_ を必ず揃えること。
+
+  ■ so_arm101_macro.xacro を include すること
+  トップレベルの so_arm101.urdf.xacro を include すると world リンクと
+  gz_ros2_control の <gazebo> ブロックまで付いてきて、ルートリンクが 2 つになる。
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi_so101">
+
+  <!-- ベース側 -->
+  <xacro:arg name="use_mesh" default="false"/>
+  <xacro:arg name="wheel_radius" default="0.05"/>
+  <xacro:arg name="base_radius" default="0.125"/>
+
+  <!-- アーム側。prefix / usb_port / ros2_control_hardware_type /
+       ros2_control_file の 4 つは so_arm101.urdf.xacro と同名・同義にしてある。
+       follower.launch.py が同じ Command 置換で単体と合成の両方を展開できる。 -->
+  <xacro:arg name="prefix" default="arm_"/>
+  <xacro:arg name="color" default="0.2 0.7 0.85 1.0"/>
+  <xacro:arg name="usb_port" default="/dev/so101_follower"/>
+  <xacro:arg name="ros2_control_hardware_type" default="real"/>
+  <xacro:arg name="ros2_control_file"
+             default="$(find so101_bringup)/control/so101_follower.ros2_control.xacro"/>
+
+  <!-- ★ TBD: 実測待ち。arm_mount_link から見たアーム基部の姿勢。
+       arm_mount_link 自体 (base_link から 0.08, -0.04, 0.057) も CAD 由来で未実測。
+       特に yaw はブラケットの向き次第で 90 度単位で変わりうる。
+       docs/agent/request.md の手順 0 と 3 で確定させること。
+       xacro のマクロ引数はベクトルを展開できないのでスカラ 6 個で渡す。 -->
+  <xacro:arg name="arm_mount_x" default="0.0"/>
+  <xacro:arg name="arm_mount_y" default="0.0"/>
+  <xacro:arg name="arm_mount_z" default="0.0"/>
+  <xacro:arg name="arm_mount_roll" default="0.0"/>
+  <xacro:arg name="arm_mount_pitch" default="0.0"/>
+  <xacro:arg name="arm_mount_yaw" default="0.0"/>
+
+  <xacro:include filename="$(find lekiwi_description)/urdf/lekiwi_base.macro.xacro"/>
+  <xacro:lekiwi_base prefix=""
+                     use_mesh="$(arg use_mesh)"
+                     wheel_radius="$(arg wheel_radius)"
+                     base_radius="$(arg base_radius)"/>
+
+  <xacro:include filename="$(find so_arm101_description)/urdf/so_arm101_macro.xacro"/>
+  <xacro:so_arm101 prefix="$(arg prefix)"
+                   color="$(arg color)"
+                   parent="arm_mount_link"
+                   x="$(arg arm_mount_x)"
+                   y="$(arg arm_mount_y)"
+                   z="$(arg arm_mount_z)"
+                   roll="$(arg arm_mount_roll)"
+                   pitch="$(arg arm_mount_pitch)"
+                   yaw="$(arg arm_mount_yaw)"/>
+
+  <xacro:include filename="$(arg ros2_control_file)"/>
+  <xacro:ros2_control prefix="$(arg prefix)"
+                      ros2_control_hardware_type="$(arg ros2_control_hardware_type)"
+                      usb_port="$(arg usb_port)"/>
+
+</robot>

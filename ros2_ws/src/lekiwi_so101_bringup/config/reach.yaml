@@ -1,0 +1,69 @@
+# so101_reach_to_point のパラメータ（LeKiwi + SO-101 結合構成）。
+#
+# ★ joint_prefix は launch から渡される。ここには書かない
+#   （結合 URDF・ros2_controllers.yaml と必ず一致させる必要があるため、
+#     一箇所（launch）でだけ決める）。
+
+so101_reach_to_point:
+  ros__parameters:
+    # base_link / tip_link は「接頭辞なし」で書く。joint_prefix が前置される。
+    base_link: base_link
+    tip_link: gripper_frame_link
+
+    target_topic: /so101/reach_target
+    # RViz の "Publish Point" は PointStamped を出す（PoseStamped ではない）。
+    # 型が違うので remap では繋がらない。ノードが両方を購読する。
+    # ★ RViz の Fixed Frame を map にしておくこと。
+    point_target_topic: /clicked_point
+    subscribe_clicked_point: true
+
+    # 目標はこのフレームでのみ受け付ける。
+    # ★ 精度が出ないうちに動かしたい場合は odom か base_footprint にする。
+    #   map->odom は slam_toolbox 由来で 2-5cm の誤差があり、それがそのまま
+    #   手先に乗る。odom->base_footprint はオドメトリ積分なので短時間なら正確。
+    expected_frame: map
+
+    tf_timeout: 0.5
+    # ★ 最重要の沈黙故障対策。slam_toolbox が死んでも tf2 は凍った map->odom を
+    #   返し続けるので、これが無いと過去の世界座標で黙って解いてしまう。
+    tf_max_age: 1.0
+
+    # SO-101 の最大到達長は arm_base_link から約 0.41m だが、関節上限で実際は
+    # かなり短い。加えて転倒余裕を取る: 天板 0.216m 角に対し支持多角形は
+    # 車輪円（直径 0.125m）で、伸ばし切ると重心が支持多角形を出うる。
+    max_reach_radius: 0.30
+    z_floor: 0.02
+    floor_frame: base_footprint
+
+    min_command_interval: 1.0
+    # 遅く動かす。約0.75kg のアームがオムニ車輪の上で振れると機体が実際に
+    # ずれるが、base_driver は指令値を積分しているのでオドメトリには現れない。
+    max_joint_speed: 0.6
+    min_reach_duration: 1.0
+    max_reach_duration: 12.0
+
+    require_stationary_base: true
+    odom_topic: /odom
+    base_linear_tolerance: 0.01
+    base_angular_tolerance: 0.05
+    base_motion_tolerance: 0.02
+    base_watch_rate: 10.0
+
+    # ★ 実機で手動確認してから埋めること（docs/agent/request.md 手順5）。
+    #   laser_link と arm_mount_link は xy で 44mm しか離れていない。
+    #   形式は "関節名:下限:上限"。URDF の可動範囲との積集合を取る。
+    #   例: ["arm_shoulder_pan_joint:-1.2:1.2"]
+    joint_limit_overrides: [""]
+
+    # ★ 実測待ち。低く畳んだ姿勢。停止前に /so101/stow で呼ぶこと
+    #   （正常終了でトルクが切れてアームが落ちるため）。
+    stow_positions: [0.0, -1.4, 1.4, 0.6, 0.0]
+
+    solver_tolerance: 0.005
+    solver_max_iterations: 200
+    solver_step: 0.02
+    solver_max_joint_step: 0.10
+    solver_damping: 0.03
+    joint_limit_margin: 0.10
+    solver_stall_tolerance: 0.0001
+    solver_stall_patience: 10

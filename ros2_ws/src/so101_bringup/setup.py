@@ -28,6 +28,7 @@ setup(
             "so101_lerobot_bridge = so101_bringup.lerobot_bridge:main",
             "so101_keyboard_input = so101_bringup.keyboard_input:main",
             "so101_cartesian_jog = so101_bringup.cartesian_jog:main",
+            "so101_reach_to_point = so101_bringup.reach_to_point:main",
         ],
     },
 )
