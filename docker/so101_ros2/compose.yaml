@@ -22,6 +22,9 @@ services:
       - ${DIALOUT_GID:-20}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # ROSワークスペースは常にホストからマウントする。
+      - ../../ros2_ws:/ros2_ws
+      - ./bootstrap.sh:/bootstrap.sh:ro
       # LeRobot JSON is the only machine-specific calibration source.
       - ${HOME}/.cache/huggingface/lerobot/calibration/robots/so_follower:/root/.cache/huggingface/lerobot/calibration/robots/so_follower:ro
     # Merely starting the container never touches the arm. Launch explicitly:

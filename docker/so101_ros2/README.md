@@ -76,11 +76,26 @@ ROS起動中に較正を作成・変更することはできません。
 
 ## 2. コンテナの構築
 
+ワークスペースは常にホストから`/ros2_ws`へmountします。初回はイメージを
+構築した後、上流ソースの取得とcolcon buildを行います。
+
 ```bash
 cd docker/so101_ros2
 docker compose build
+docker compose run --rm so101-follower bash /bootstrap.sh
 docker compose up -d
 ```
+
+`src`、xacro、Pythonコードを変更した場合はイメージを再構築せず、必要に応じて
+次のコマンドでホスト側の`build/install`を更新します。
+
+```bash
+docker compose run --rm so101-follower bash /bootstrap.sh
+docker compose up -d
+```
+
+`docker compose down`やイメージの作り直し後も、ソースとビルド成果物はホスト側に
+残ります。実行方式を切り替えるための別composeファイルはありません。
 
 実機デバイスを渡す場合は`.env`を作成します。
 
@@ -160,6 +175,7 @@ NaN、無限値、不足・重複・未知の関節を含む指令は実機へ�
 
 ```bash
 docker compose build
+docker compose run --rm so101-follower bash /bootstrap.sh
 docker compose up -d
 docker compose exec -it so101-follower /entrypoint.sh \
   ros2 launch so101_bringup follower.launch.py backend:=mock

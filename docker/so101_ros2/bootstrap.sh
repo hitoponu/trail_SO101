@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 開発用オーバーレイ（compose.dev.yaml）の初期化。
+# ホストからマウントした ros2_ws の初期化。
 #
-#   docker compose -f compose.yaml -f compose.dev.yaml run --rm so101-follower \
-#     bash /bootstrap.sh
+#   docker compose run --rm so101-follower bash /bootstrap.sh
 #
-# ホスト側の ros2_ws を使うので、上流の取得とビルドを一度だけホスト側へ行う。
-# 2回目以降は不要（必要になるのは上流の SHA を変えたときくらい）。
+# 上流の取得と colcon build をここに集約する。
+# 成果物はホスト側の ros2_ws/build・install に残るので、イメージの
+# 作り直しやコンテナの作り直しで消えない。
 set -eo pipefail
 
 # ROS の setup.bash は未定義変数を参照するので set -u とは併用できない
@@ -22,6 +22,16 @@ else
   echo "   (更新するには src/ros2_so_arm を消してから再実行)"
 fi
 
+# Pythonパッケージのデータファイルを削除した後は、symlink-installの
+# 旧成果物が残っているとsetuptoolsが存在しないファイルをコピーしようと
+# する。該当パッケージの生成物だけを消して再生成する。
+if [ -L build/so101_bringup/config/so101_offsets.xacro ] \
+    && [ ! -e build/so101_bringup/config/so101_offsets.xacro ]; then
+  echo
+  echo "== 古い so101_bringup の生成物を再生成します =="
+  rm -rf build/so101_bringup install/so101_bringup
+fi
+
 echo
 echo "== ビルドします =="
 # rplidar_bringup / realsense_bringup は依存 (laser_geometry 等) が
@@ -32,7 +42,7 @@ colcon build --symlink-install \
 echo
 echo "== 完了 =="
 echo "以降は次で起動できます:"
-echo "  docker compose -f compose.yaml -f compose.dev.yaml up"
+echo "  docker compose up -d"
 echo
 echo "設定やPythonコードを編集したら再起動するだけで反映されます。"
 echo "ファイルを追加した場合だけ、コンテナ内で colcon build してください:"
