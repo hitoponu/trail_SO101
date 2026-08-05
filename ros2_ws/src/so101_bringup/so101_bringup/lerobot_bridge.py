@@ -37,12 +37,20 @@ class SO101LeRobotBridge(Node):
         self.declare_parameter("update_rate", 50.0)
         self.declare_parameter("command_timeout", 0.5)
         self.declare_parameter("robot_description", "")
+        # The upstream xacro macro applies `prefix` to joint names as well as
+        # link names, so a composed robot (arm on the LeKiwi base) sends
+        # e.g. arm_shoulder_pan_joint. Everything below the ROS boundary uses
+        # unprefixed canonical names, so strip on input and reapply on output.
+        self.declare_parameter("joint_prefix", "")
 
         update_rate = float(self.get_parameter("update_rate").value)
         if update_rate <= 0:
             raise ValueError("update_rate must be positive")
         robot_description = str(self.get_parameter("robot_description").value)
-        self._gripper_limit = gripper_limit_from_urdf(robot_description)
+        self._joint_prefix = str(self.get_parameter("joint_prefix").value)
+        self._gripper_limit = gripper_limit_from_urdf(
+            robot_description, self._joint_prefix
+        )
         self._watchdog = CommandWatchdog(
             float(self.get_parameter("command_timeout").value)
         )
@@ -83,9 +91,26 @@ class SO101LeRobotBridge(Node):
         response.message = "ready" if response.success else str(self._fault)
         return response
 
+    def _strip_prefix(self, names) -> list[str]:
+        """Drop the configured prefix; leave unprefixed names for the validator.
+
+        A name that lacks the prefix is passed through untouched so
+        ordered_ros_positions reports it as unknown, which names the offending
+        joint instead of failing with a confusing count mismatch.
+        """
+        if not self._joint_prefix:
+            return list(names)
+        width = len(self._joint_prefix)
+        return [
+            name[width:] if name.startswith(self._joint_prefix) else name
+            for name in names
+        ]
+
     def _command_callback(self, message: JointState) -> None:
         try:
-            ordered = ordered_ros_positions(message.name, message.position)
+            ordered = ordered_ros_positions(
+                self._strip_prefix(message.name), message.position
+            )
             self._command = ros_to_lerobot(ordered, self._gripper_limit)
             self._watchdog.mark()
         except InvalidJointCommand as exc:
@@ -103,7 +128,7 @@ class SO101LeRobotBridge(Node):
             velocities = self._velocity.update(ros_positions, time.monotonic())
             message = JointState()
             message.header.stamp = self.get_clock().now().to_msg()
-            message.name = list(ROS_JOINTS)
+            message.name = [f"{self._joint_prefix}{name}" for name in ROS_JOINTS]
             message.position = [ros_positions[name] for name in ROS_JOINTS]
             message.velocity = [velocities[name] for name in ROS_JOINTS]
             self._state_publisher.publish(message)

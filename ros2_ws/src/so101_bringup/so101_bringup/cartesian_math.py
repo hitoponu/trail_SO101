@@ -9,6 +9,30 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 
+# Canonical unprefixed joint names, in the order arm_target() expects: the four
+# controlled joints first, then wrist_roll, which arm_target() preserves.
+# The upstream xacro macro applies its `prefix` argument to joint names as well
+# as link names, so a composed robot uses e.g. arm_shoulder_pan_joint. Build
+# those with prefixed() rather than hardcoding a second list.
+ARM_JOINTS = (
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_flex_joint",
+    "wrist_flex_joint",
+    "wrist_roll_joint",
+)
+CONTROLLED_JOINTS = ARM_JOINTS[:-1]
+
+# Unprefixed link names of the chain the Jacobian is expressed in.
+BASE_LINK = "base_link"
+TIP_LINK = "gripper_frame_link"
+
+
+def prefixed(names, prefix: str = "") -> list[str]:
+    """Apply an xacro link/joint name prefix to a sequence of canonical names."""
+    return [f"{prefix}{name}" for name in names]
+
+
 KEY_DIRECTIONS = {
     "w": np.array([1.0, 0.0, 0.0]),
     "s": np.array([-1.0, 0.0, 0.0]),

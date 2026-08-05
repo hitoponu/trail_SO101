@@ -40,19 +40,26 @@ class JointLimit:
         return min(self.upper, max(self.lower, value))
 
 
-def gripper_limit_from_urdf(robot_description: str) -> JointLimit:
-    """Read the gripper operating range from the runtime robot description."""
+def gripper_limit_from_urdf(robot_description: str, prefix: str = "") -> JointLimit:
+    """Read the gripper operating range from the runtime robot description.
+
+    `prefix` matches the xacro `prefix` argument, which the upstream macro
+    applies to joint names as well as link names. Everything else in this
+    module works in unprefixed canonical names; the prefix is stripped and
+    reapplied at the ROS boundary in lerobot_bridge.
+    """
     try:
         root = ElementTree.fromstring(robot_description)
     except ElementTree.ParseError as exc:
         raise ValueError("robot_description is not valid XML") from exc
 
+    wanted = f"{prefix}gripper_joint"
     joint = next(
-        (item for item in root.findall("joint") if item.get("name") == "gripper_joint"),
+        (item for item in root.findall("joint") if item.get("name") == wanted),
         None,
     )
     if joint is None:
-        raise ValueError("robot_description has no gripper_joint")
+        raise ValueError(f"robot_description has no {wanted}")
     limit = joint.find("limit")
     if limit is None or limit.get("lower") is None or limit.get("upper") is None:
         raise ValueError("gripper_joint must have lower and upper limits")

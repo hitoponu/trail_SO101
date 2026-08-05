@@ -52,6 +52,7 @@ def generate_launch_description():
     serial_port = LaunchConfiguration("serial_port")
     map_file = LaunchConfiguration("map_file")
     start_rviz = LaunchConfiguration("start_rviz")
+    start_robot_state_publisher = LaunchConfiguration("start_robot_state_publisher")
     start_lidar = LaunchConfiguration("start_lidar")
     base_params = LaunchConfiguration("base_params_file")
     nav2_params = LaunchConfiguration("nav2_params_file")
@@ -71,6 +72,11 @@ def generate_launch_description():
             description="地図 YAML ファイルのパス。nav.launch.py + map_saver_cli で生成したもの。",
         ),
         DeclareLaunchArgument("start_rviz", default_value="true"),
+        # /robot_description は TRANSIENT_LOCAL / depth 1 なので、publisher が
+        # 2 つあると後から繋いだ購読者がどちらの latch を掴むか非決定になる
+        # (CLAUDE.md の「RViz に別のロボットが出る」症状)。アームを載せた
+        # 合成 launch は自分でロボット全体の RSP を持つので false にする。
+        DeclareLaunchArgument("start_robot_state_publisher", default_value="true"),
         DeclareLaunchArgument(
             "start_lidar", default_value="true",
             description="true: このプロセス内で sllidar_node を起動する。"
@@ -95,6 +101,7 @@ def generate_launch_description():
             name="robot_state_publisher",
             output="screen",
             parameters=[{"robot_description": robot_description}],
+            condition=IfCondition(start_robot_state_publisher),
         ),
 
         Node(

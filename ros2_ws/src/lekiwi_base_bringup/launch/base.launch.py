@@ -26,6 +26,7 @@ def generate_launch_description():
     port = LaunchConfiguration("port")
     dry_run = LaunchConfiguration("dry_run")
     start_rviz = LaunchConfiguration("start_rviz")
+    start_robot_state_publisher = LaunchConfiguration("start_robot_state_publisher")
     use_mesh = LaunchConfiguration("use_mesh")
     config_file = LaunchConfiguration("config_file")
     rviz_config = LaunchConfiguration("rviz_config")
@@ -45,6 +46,11 @@ def generate_launch_description():
         DeclareLaunchArgument("port", default_value="/dev/lekiwi"),
         DeclareLaunchArgument("dry_run", default_value="false"),
         DeclareLaunchArgument("start_rviz", default_value="true"),
+        # /robot_description は TRANSIENT_LOCAL / depth 1 なので、publisher が
+        # 2 つあると後から繋いだ購読者がどちらの latch を掴むか非決定になる
+        # (CLAUDE.md の「RViz に別のロボットが出る」症状)。アームを載せた
+        # 合成 launch は自分でロボット全体の RSP を持つので false にする。
+        DeclareLaunchArgument("start_robot_state_publisher", default_value="true"),
         DeclareLaunchArgument("use_mesh", default_value="false"),
         DeclareLaunchArgument(
             "config_file",
@@ -62,6 +68,7 @@ def generate_launch_description():
             name="robot_state_publisher",
             output="screen",
             parameters=[{"robot_description": robot_description}],
+            condition=IfCondition(start_robot_state_publisher),
         ),
 
         Node(

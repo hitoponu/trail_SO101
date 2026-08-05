@@ -16,31 +16,31 @@ from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from so101_bringup.cartesian_math import (
+    ARM_JOINTS,
+    BASE_LINK,
+    CONTROLLED_JOINTS,
     SerialChain,
+    TIP_LINK,
     arm_target,
     damped_least_squares,
     missing_joints,
+    prefixed,
     validate_xyz_command,
 )
-
-
-ARM_JOINTS = [
-    "shoulder_pan_joint",
-    "shoulder_lift_joint",
-    "elbow_flex_joint",
-    "wrist_flex_joint",
-    "wrist_roll_joint",
-]
-CONTROLLED_JOINTS = ARM_JOINTS[:-1]
 
 
 class CartesianJog(Node):
     def __init__(self) -> None:
         super().__init__("so101_cartesian_jog")
         defaults = {
-            "base_link": "base_link",
-            "tip_link": "gripper_frame_link",
-            "command_frame": "base_link",
+            # base_link / tip_link / command_frame are given UNPREFIXED;
+            # joint_prefix is applied to them as well as to the joint names,
+            # because the twist has to be expressed in the frame the Jacobian
+            # is built in and there is no tf2 here to convert between frames.
+            "joint_prefix": "",
+            "base_link": BASE_LINK,
+            "tip_link": TIP_LINK,
+            "command_frame": BASE_LINK,
             "command_topic": "/so101/cartesian_twist",
             "trajectory_topic": "/joint_trajectory_controller/joint_trajectory",
             "control_rate": 20.0,
@@ -53,9 +53,12 @@ class CartesianJog(Node):
         for name, value in defaults.items():
             self.declare_parameter(name, value)
 
-        self._base = str(self.get_parameter("base_link").value)
-        self._tip = str(self.get_parameter("tip_link").value)
-        self._frame = str(self.get_parameter("command_frame").value)
+        prefix = str(self.get_parameter("joint_prefix").value)
+        self._base = prefix + str(self.get_parameter("base_link").value)
+        self._tip = prefix + str(self.get_parameter("tip_link").value)
+        self._frame = prefix + str(self.get_parameter("command_frame").value)
+        self._arm_joints = prefixed(ARM_JOINTS, prefix)
+        self._controlled_joints = prefixed(CONTROLLED_JOINTS, prefix)
         self._horizon = float(self.get_parameter("trajectory_horizon").value)
         self._max_joint_velocity = float(self.get_parameter("max_joint_velocity").value)
         self._margin = float(self.get_parameter("joint_limit_margin").value)
@@ -95,8 +98,8 @@ class CartesianJog(Node):
             return
         try:
             chain = SerialChain.from_urdf(message.data, self._base, self._tip)
-            limits = chain.limits(CONTROLLED_JOINTS)
-            for name, (lower, upper) in zip(CONTROLLED_JOINTS, limits):
+            limits = chain.limits(self._controlled_joints)
+            for name, (lower, upper) in zip(self._controlled_joints, limits):
                 if not np.isfinite([lower, upper]).all() or lower + self._margin >= upper - self._margin:
                     raise ValueError(f"{name} の可動範囲または余白が不正")
             self._chain = chain
@@ -137,19 +140,19 @@ class CartesianJog(Node):
         self._last_command_monotonic = time.monotonic()
 
     def _ready_positions(self) -> np.ndarray | None:
-        missing = missing_joints(self._positions, ARM_JOINTS)
+        missing = missing_joints(self._positions, self._arm_joints)
         if self._chain is None or missing:
             if missing and not self._warned_missing_state:
                 self.get_logger().warn(f"関節状態を待っています: {missing}")
                 self._warned_missing_state = True
             return None
         self._warned_missing_state = False
-        return np.array([self._positions[name] for name in ARM_JOINTS], dtype=float)
+        return np.array([self._positions[name] for name in self._arm_joints], dtype=float)
 
     def _publish_positions(self, positions: np.ndarray) -> None:
         message = JointTrajectory()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.joint_names = ARM_JOINTS
+        message.joint_names = list(self._arm_joints)
         point = JointTrajectoryPoint()
         point.positions = [float(value) for value in positions]
         seconds = int(self._horizon)
@@ -177,9 +180,11 @@ class CartesianJog(Node):
             return
 
         assert self._chain is not None
-        position_map = dict(zip(ARM_JOINTS, positions))
+        position_map = dict(zip(self._arm_joints, positions))
         try:
-            _, jacobian = self._chain.position_and_jacobian(position_map, CONTROLLED_JOINTS)
+            _, jacobian = self._chain.position_and_jacobian(
+                position_map, self._controlled_joints
+            )
             joint_velocity = damped_least_squares(
                 jacobian, self._velocity, self._damping, self._max_joint_velocity
             )

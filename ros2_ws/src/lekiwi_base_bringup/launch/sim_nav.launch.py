@@ -58,6 +58,7 @@ def generate_launch_description():
     xacro_file = description_share / "urdf" / "lekiwi_base.urdf.xacro"
 
     start_rviz = LaunchConfiguration("start_rviz")
+    start_robot_state_publisher = LaunchConfiguration("start_robot_state_publisher")
     start_slam = LaunchConfiguration("start_slam")
     start_nav2 = LaunchConfiguration("start_nav2")
     base_params = LaunchConfiguration("base_params_file")
@@ -80,6 +81,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("start_rviz", default_value="true"),
+        # /robot_description は TRANSIENT_LOCAL / depth 1 なので、publisher が
+        # 2 つあると後から繋いだ購読者がどちらの latch を掴むか非決定になる
+        # (CLAUDE.md の「RViz に別のロボットが出る」症状)。アームを載せた
+        # 合成 launch は自分でロボット全体の RSP を持つので false にする。
+        DeclareLaunchArgument("start_robot_state_publisher", default_value="true"),
         DeclareLaunchArgument("start_slam", default_value="true"),
         DeclareLaunchArgument("start_nav2", default_value="true"),
         DeclareLaunchArgument(
@@ -115,6 +121,7 @@ def generate_launch_description():
             name="robot_state_publisher",
             output="screen",
             parameters=[{"robot_description": robot_description}],
+            condition=IfCondition(start_robot_state_publisher),
         ),
 
         # ★ dry_run を固定する。この launch はシリアルを一切触らない。
