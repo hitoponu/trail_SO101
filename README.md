@@ -5,7 +5,12 @@ SO101 を lerobot で動かすためのリポジトリ。
 ## セットアップ
 
 ```bash
-brew install ffmpeg 
+# macOS (開発機)
+brew install ffmpeg
+
+# Ubuntu (実機を繋ぐ PC)
+sudo apt-get update && sudo apt-get install -y ffmpeg
+
 uv sync
 ```
 
@@ -48,17 +53,22 @@ done
 
 ## ROS 2 (Docker)
 
-ROS 2 Jazzy の構成は `docker/` 以下にまとめてある。いずれも **Linux ホスト**が前提
+ROS 2 Jazzy の構成は `docker/` 以下にまとめてある。ROS 2 パッケージの実体は
+`ros2_ws/src/` にある。実機を繋ぐものはいずれも **Linux ホスト**が前提
 （macOS の Docker はシリアル/USB デバイスをコンテナへ渡せないため）。
 
 | 対象 | 内容 | ドキュメント |
 | --- | --- | --- |
+| SO-101 フォロワアーム | LeRobotバックエンドと薄いROSブリッジで`FollowJointTrajectory`とグリッパを提供 | [docker/so101_ros2/README.md](docker/so101_ros2/README.md) |
 | LeKiwi ベース | 3輪オムニベースを `/cmd_vel` で駆動し、オドメトリと TF を出す | [docker/lekiwi_base_ros2/README.md](docker/lekiwi_base_ros2/README.md) |
+| LeKiwi + SO-101（リーチ） | ベースにアームを載せ、`map` 上の点へ手先を伸ばす | [docker/lekiwi_so101_bringup/README.md](docker/lekiwi_so101_bringup/README.md) |
 | RPLIDAR A1M8 | 2DスキャンをPointCloud2へ変換してRViz 2で表示 | [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md) |
 | RealSense D435i | D435i を起動してRViz 2で表示 | [docker/realsense_ros2/README.md](docker/realsense_ros2/README.md) |
-
-ROS 2 パッケージの実体は `ros2_ws/src/` にある。
 
 > **LeKiwi ベースの安全上の注意**: この機体は 7.4V 版アームと 12V 版ホイールの
 > 混在構成のため、**12V 給電中にアーム（モータ ID 1〜6）をバスへ繋いではいけない**。
 > 詳細は上記 README を参照。
+
+> **SO-101 アームの安全上の注意**: ブリッジの正常終了で
+> **トルクが切れてアームが落ちる**。停止前に必ず低く畳んだ姿勢へ動かすこと。
+> 詳細は上記 README の冒頭を参照。

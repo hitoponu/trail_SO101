@@ -1,0 +1,37 @@
+# 開発用のオーバーレイ。**ワークスペース全体をホストからマウントする。**
+#
+#   # 初回だけ（上流の取得とビルド）
+#   docker compose -f compose.yaml -f compose.dev.yaml run --rm so101-follower \
+#     bash /bootstrap.sh
+#
+#   # 以降
+#   docker compose -f compose.yaml -f compose.dev.yaml up
+#
+# ■ 考え方
+# リポジトリが正で、コンテナは実行環境（ROS + apt 依存）だけを提供する。
+# ソースもビルド成果物も**ホスト側に残る**ので、
+#
+#   * 設定やコードを編集 → コンテナを再起動するだけで反映
+#   * ファイルを追加したら、コンテナ内で colcon build → 再起動
+#   * その結果は docker compose down しても消えない
+#
+# ■ compose.yaml 単体（このファイルを使わない）との違い
+# 素の compose.yaml はイメージに焼かれたソースと install 空間を使う。
+# 自己完結していて `docker compose up` だけで動くが、
+# 変更のたびに `docker compose build` が要る。
+# **実機の調整中はこちら（dev）、動作確認や配布は素の compose.yaml、
+# と使い分けるのが良い。**
+#
+# ■ 注意
+# ホストの ros2_ws/{build,install,log} は .gitignore 済み。
+# アーキテクチャに依存するので、Mac で作ったものを Linux へ持って行っても動かない。
+# 各マシンで一度 bootstrap すること。
+
+services:
+  so101-follower:
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # ワークスペース全体。src だけでなく build/install もホストに置くことで、
+      # コンテナを作り直しても colcon build の結果が消えない。
+      - ../../ros2_ws:/ros2_ws
+      - ./bootstrap.sh:/bootstrap.sh:ro

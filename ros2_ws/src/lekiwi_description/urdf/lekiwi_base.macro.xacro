@@ -264,8 +264,14 @@
     </link>
 
     <!--
-      アーム取付位置 (将来用)。CAD (0.04, 0.08, 0.057) → base_link (0.08, -0.04, 0.057)。
-      現在アームは 12V バス保護のため物理的に切り離してある。
+      アーム取付位置。CAD (0.04, 0.08, 0.057) → base_link (0.08, -0.04, 0.057)。
+      SO-101 を載せる構成は lekiwi_so101_bringup を参照 (このマクロ単体では何も生えない)。
+
+      ★ この値は CAD 由来で実測していない。特にブラケットの向き (yaw) は未確認。
+        laser_xyz_TBD と同じく実測待ちなので、確定するまで数 cm の誤差を前提にすること。
+
+      ★ 電源系の注意: アームは 7.4V、ホイールは 12V。同一バスへ繋いではいけない。
+        アームを載せても給電とシリアルバスは別系統のまま保つこと。
     -->
     <joint name="${prefix}arm_mount_joint" type="fixed">
       <origin xyz="0.08 -0.04 0.057" rpy="0 0 0"/>
@@ -273,7 +279,15 @@
       <child link="${prefix}arm_mount_link"/>
     </joint>
 
-    <link name="${prefix}arm_mount_link"/>
+    <!-- TBD 材質のマーカー。RViz で取付位置が未確定であることが見て分かるようにする。 -->
+    <link name="${prefix}arm_mount_link">
+      <visual>
+        <geometry>
+          <box size="0.02 0.02 0.004"/>
+        </geometry>
+        <material name="lekiwi_tbd"/>
+      </visual>
+    </link>
 
   </xacro:macro>
 </robot>

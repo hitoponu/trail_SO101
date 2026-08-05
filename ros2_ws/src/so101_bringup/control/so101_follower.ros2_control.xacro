@@ -1,0 +1,34 @@
+<?xml version="1.0" ?>
+<!--
+  ros2_control only sees ROS JointState topics. All hardware communication,
+  calibration and motor configuration belongs to the LeRobot bridge.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- The upstream description calls this macro with these legacy arguments. -->
+  <xacro:macro name="ros2_control" params="prefix ros2_control_hardware_type usb_port">
+    <ros2_control name="SO_ARM101" type="system">
+      <hardware>
+        <plugin>joint_state_topic_hardware_interface/JointStateTopicSystem</plugin>
+        <param name="joint_commands_topic">/so101/hardware_commands</param>
+        <param name="joint_states_topic">/so101/hardware_states</param>
+        <!-- Required for the bridge watchdog even while the arm is stationary. -->
+        <param name="trigger_joint_command_threshold">-1</param>
+      </hardware>
+
+      <xacro:macro name="position_joint" params="name">
+        <joint name="${prefix}${name}">
+          <command_interface name="position"/>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+      </xacro:macro>
+
+      <xacro:position_joint name="shoulder_pan_joint"/>
+      <xacro:position_joint name="shoulder_lift_joint"/>
+      <xacro:position_joint name="elbow_flex_joint"/>
+      <xacro:position_joint name="wrist_flex_joint"/>
+      <xacro:position_joint name="wrist_roll_joint"/>
+      <xacro:position_joint name="gripper_joint"/>
+    </ros2_control>
+  </xacro:macro>
+</robot>

@@ -2966,7 +2966,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "lerobot", extras = ["feetech"], specifier = ">=0.5.1" },
+    { name = "lerobot", extras = ["feetech"], specifier = "==0.5.1" },
     { name = "placo", specifier = ">=0.9.6,<0.9.17" },
 ]
 

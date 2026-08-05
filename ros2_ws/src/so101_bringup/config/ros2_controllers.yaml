@@ -1,0 +1,43 @@
+# SO-101 controllers. Hardware-specific calibration and registers are owned by
+# LeRobot; this file only configures standard ros2_control behavior.
+
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz
+
+    enforce_command_limits: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    gripper_controller:
+      type: parallel_gripper_action_controller/GripperActionController
+
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_flex_joint
+      - wrist_flex_joint
+      - wrist_roll_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 3.0
+
+
+gripper_controller:
+  ros__parameters:
+    joint: gripper_joint
+    allow_stalling: true
+    goal_tolerance: 0.03
+    stall_velocity_threshold: 0.01
+    stall_timeout: 1.0

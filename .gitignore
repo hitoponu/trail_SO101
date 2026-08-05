@@ -16,6 +16,9 @@ wheels/
 # images
 captured_images/
 outputs/
+# vcs import で Docker ビルド中に展開する上流リポジトリ (ros2_ws/so101_upstream.repos)。
+# メッシュが SO101/assets と完全に同一なので追跡しない。
+ros2_ws/src/ros2_so_arm/
 
 # colcon
 ros2_ws/install/
