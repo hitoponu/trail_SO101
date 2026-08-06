@@ -125,6 +125,12 @@ services:
       - ${DIALOUT_GID:-20}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # ★ ROS ワークスペースは常にホストからマウントする。
+      # イメージにパッケージを焼き込まないので、lekiwi_description も
+      # so_arm101_description もここから解決される。
+      # 初回とパッケージ追加時は bootstrap.sh を走らせること。
+      - ../../ros2_ws:/ros2_ws
+      - ../so101_ros2/bootstrap.sh:/bootstrap.sh:ro
       # LeRobot の較正値。実体はサーボの EEPROM で、この JSON はその控え。
       # 較正を実行した PC のホームにしか無い。
       - ${HOME}/.cache/huggingface/lerobot/calibration/robots/so_follower:/root/.cache/huggingface/lerobot/calibration/robots/so_follower:ro

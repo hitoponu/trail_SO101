@@ -1,7 +1,8 @@
 # LeKiwi + SO-101 リーチ構成の操作窓口。
 #
 # 使い方:
-#   make build       イメージを 3 つビルド
+#   make build       イメージをビルド
+#   make bootstrap   ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
 #   make mock        実機に触れないモック構成で起動 (Mac 可)
 #   make reach       実機で起動 (要 .env、要 udev ルール)
 #   make shell       アームのコンテナに入る
@@ -26,7 +27,15 @@ E        := /entrypoint.sh
 #   防ぎたいのは「4 つ目のスタック」。
 CONFLICTS := so101-follower lekiwi-base lekiwi-nav-mock rplidar-a1
 
-.PHONY: build mock reach shell stow save-map check down logs guard
+.PHONY: build bootstrap mock reach shell stow save-map check down logs guard
+
+# ★ アーム側は ros2_ws をホストからマウントする方式なので、
+#   イメージをビルドしただけでは install/ が空で launch できない。
+#   初回と、パッケージを追加したときに実行すること。
+#   成果物はホストの ros2_ws/build・install に残る。
+bootstrap:
+	docker compose -f compose.mock.yaml run --rm --no-deps \
+		lekiwi-so101-arm-mock bash /bootstrap.sh
 
 guard:
 	@for name in $(CONFLICTS); do \

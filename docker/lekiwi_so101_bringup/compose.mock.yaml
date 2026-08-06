@@ -70,6 +70,12 @@ services:
       ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # ★ ROS ワークスペースは常にホストからマウントする。
+      # イメージにパッケージを焼き込まないので、lekiwi_description も
+      # so_arm101_description もここから解決される。
+      # 初回とパッケージ追加時は bootstrap.sh を走らせること。
+      - ../../ros2_ws:/ros2_ws
+      - ../so101_ros2/bootstrap.sh:/bootstrap.sh:ro
     # backend:=mock でアーム側はシリアルを開かない。
     command:
       - ros2
