@@ -14,9 +14,18 @@
 #   * .env の LEKIWI_DEVICE / RPLIDAR_DEVICE が実機に合っている
 #
 # ■ 地図の保存 (別ターミナルから)
-#   docker exec lekiwi-nav \
-#     ros2 run nav2_map_server map_saver_cli -f /tmp/my_room
-#   その後 docker cp lekiwi-nav:/tmp/my_room.* ~/map/
+#   nav.launch.py が map_saver_server を自動起動しているので、まずはこちら:
+#     make save-map [MAP_NAME=my_room]
+#   または直接:
+#     docker exec lekiwi-nav ros2 run lekiwi_base_bringup save_map my_room
+#   /maps/ (= ホストの MAP_DIR) に保存されるので docker cp は不要。
+#
+#   フォールバック (map_saver_server が使えない場合):
+#     docker exec lekiwi-nav ros2 run nav2_map_server map_saver_cli \
+#       -f /tmp/my_room --ros-args -p save_map_timeout:=10.0
+#     docker cp lekiwi-nav:/tmp/my_room.* ~/map/
+#     ★ 既定の save_map_timeout (2.0s) だと discovery が間に合わず
+#       "Failed to spin map subscription" で失敗することがある
 
 services:
   lekiwi-nav:

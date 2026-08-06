@@ -9,8 +9,9 @@ nav.launch.py が動いている状態で呼び出す。
 /maps/ はコンテナ起動時にホストの MAP_DIR をマウントしたディレクトリ。
 ホストから確認するには MAP_DIR (既定: ~/maps) を参照。
 
-nav.launch.py の navigation_launch.py が /map_saver/save_map サービスを
-提供しているため、そのサービスを呼び出して yaml + pgm を生成する。
+nav.launch.py が (start_slam:=true のとき) map_saver_server を起動して
+/map_saver/save_map サービスを提供しているため、そのサービスを呼び出して
+yaml + pgm を生成する。
 """
 
 from __future__ import annotations

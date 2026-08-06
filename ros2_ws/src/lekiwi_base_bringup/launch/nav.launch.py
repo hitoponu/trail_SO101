@@ -39,7 +39,14 @@
         orientation: {w: 1.0}}}'
 
 ■ 地図の保存
-    ros2 run nav2_map_server map_saver_cli -f ~/map/my_room
+  start_slam:=true のときは map_saver_server + 専用 lifecycle_manager を
+  自動起動しているので、以下のどちらかで保存できる:
+
+    ros2 run lekiwi_base_bringup save_map [名前]   # /map_saver/save_map を呼ぶ
+    ros2 run nav2_map_server map_saver_cli -f ~/map/my_room \\
+      --ros-args -p save_map_timeout:=10.0
+      # ★ 既定の save_map_timeout (2.0s) だとこの環境では discovery が
+      #   間に合わず "Failed to spin map subscription" で失敗することがある
 """
 
 from pathlib import Path
@@ -197,6 +204,35 @@ def generate_launch_description():
                 "autostart": "true",
             }.items(),
             condition=IfCondition(start_nav2),
+        ),
+
+        # ★ navigation_launch.py は /map_saver/save_map サービスを提供しない
+        #   (controller/planner/behavior 系のみ)。地図保存には nav2_map_server の
+        #   map_saver_server を別途起動する必要がある。専用の lifecycle_manager で
+        #   configure/activate しないと "サービスが見つかりません" のまま止まる。
+        Node(
+            package="nav2_map_server",
+            executable="map_saver_server",
+            name="map_saver",
+            output="screen",
+            parameters=[{
+                "save_map_timeout": 10.0,
+                "free_thresh_default": 0.25,
+                "occupied_thresh_default": 0.65,
+            }],
+            condition=IfCondition(start_slam),
+        ),
+        Node(
+            package="nav2_lifecycle_manager",
+            executable="lifecycle_manager",
+            name="lifecycle_manager_map_saver",
+            output="screen",
+            parameters=[{
+                "use_sim_time": False,
+                "autostart": True,
+                "node_names": ["map_saver"],
+            }],
+            condition=IfCondition(start_slam),
         ),
 
         Node(
