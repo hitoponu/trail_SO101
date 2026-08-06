@@ -51,10 +51,18 @@ LeKiwi 移動ベースに SO-101 アームを載せ、**`map` 座標系に固定
 ```bash
 cp .env.example .env      # ★ 先に実機に合わせて編集する
 make build
+make bootstrap            # ★ 初回とパッケージ追加時。飛ばすと起動できない
 
 make mock                 # 実機に触れない（Mac 可）
 make reach                # 実機
 ```
+
+> ★ **`make bootstrap` を飛ばさないこと。** このイメージはワークスペースを
+> 焼き込まず、ホストからマウントします。`ros2_ws/install` と
+> `ros2_ws/src/ros2_so_arm` は `.gitignore` 済みで `git pull` では降ってきません。
+> 飛ばすと `Package 'lekiwi_so101_bringup' not found` になります。
+> `bootstrap.sh` は上流の取得と `colcon build` に加え、結合 URDF の静的検査
+> （単一ツリー / リンク名の重複 / controllers の関節名）も走らせます。
 
 別ターミナルから目標を与える。
 

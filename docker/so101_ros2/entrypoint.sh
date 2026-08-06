@@ -10,8 +10,8 @@ if [ -f /ros2_ws/install/setup.bash ]; then
 else
   echo "警告: /ros2_ws/install/setup.bash がありません。" >&2
   echo "      先にホストマウント式ワークスペースを初期化してください:" >&2
-  echo "        docker compose run --rm \\" >&2
-  echo "          so101-follower bash /bootstrap.sh" >&2
+  echo "        docker/so101_ros2       : docker compose run --rm so101-follower bash /bootstrap.sh" >&2
+  echo "        docker/lekiwi_so101_bringup : make bootstrap" >&2
 fi
 
 if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then

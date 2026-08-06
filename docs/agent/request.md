@@ -108,20 +108,57 @@ print('スキャン結果:', FeetechMotorsBus.scan_port('/dev/so101_follower'))
 "
 ```
 
+期待する出力（`scan_port` は `{ボーレート: [ID, ...]}` を返します）:
+
+```
+スキャン結果: {1000000: [1, 2, 3, 4, 5, 6]}
+```
+
 **アーム側のスキャンに 7・8・9 が出たら、そこで止めてください。**
 バスが分離されていません（12V がアームに掛かる構成です）。
 
-### 手順 1 🟢 取得とビルド
+ボーレートが 1000000 以外だった場合も、値をそのまま報告してください。
+
+### 手順 1 🟢 取得とビルドと初期化
 
 ```bash
 git pull
 git switch feat/lekiwi-so101-reach
 cd docker/lekiwi_so101_bringup
-cp .env.example .env      # ★ デバイス名と DIALOUT_GID を実機に合わせる
-make build
+cp .env.example .env
 ```
 
-`getent group dialout` の出力も報告してください（`DIALOUT_GID` の確認）。
+**★ `.env` をここで実機に合わせて直してください（後回しにしない）。**
+
+```bash
+getent group dialout          # 出力の3番目が DIALOUT_GID。20 でなければ .env を直す
+ls -l /dev/lekiwi /dev/so101_follower /dev/rplidar
+ls ~/.cache/huggingface/lerobot/calibration/robots/so_follower/
+# ↑ ここに出た .json のファイル名（拡張子を除いた部分）が robot_id です。
+#   手順 3 で使うので報告してください。
+```
+
+```bash
+make build
+make bootstrap            # ★ これを飛ばすと手順 2 が必ず失敗します
+```
+
+**★ `make bootstrap` は必須です。** このイメージはワークスペースを
+焼き込まず、ホストからマウントする方式です。`ros2_ws/install` と
+`ros2_ws/src/ros2_so_arm` は `.gitignore` 済みなので **`git pull` では
+降ってきません**。`bootstrap.sh` が上流の取得と `colcon build` をやります。
+飛ばすと手順 2 で `Package 'lekiwi_so101_bringup' not found` になります。
+
+`make bootstrap` の最後に「静的検査」が 3 行出ます。
+**3 つとも OK でなければ、そこで止めて報告してください。**
+
+```
+  Python import: OK
+  アーム単体 URDF: OK
+  結合 URDF: OK
+```
+
+報告: `getent group dialout` の出力、`robot_id`、`make bootstrap` の末尾。
 
 ### 手順 2 🟢 アーム電源 OFF でモック起動
 
@@ -136,6 +173,11 @@ make mock
 ```bash
 make check
 ```
+
+**★ `make check` は DDS の discovery が落ち着くまで待ってから表示します。**
+起動直後に自分で `ros2 topic info` を叩くと publisher 数が実際より少なく
+出ます（0 や 1 になる）。ノードの不具合ではないので、`make check` の
+出力のほうを使ってください。
 
 報告してほしい出力（**そのまま貼ってください**）:
 
@@ -159,21 +201,31 @@ docker cp lekiwi-so101-arm-mock:/tmp/frames.pdf ~/frames_mock.pdf
 
 ### 手順 3 🟡 アーム電源 ON、指令なし（**人がアームを支えること**）
 
+> **★ 先に車輪を床から浮かせ、ブロック等に載せてください。**
+> 手順 4 で `/cmd_vel` を出します。通電してアームに人が手を添えた状態のまま
+> 0.75kg のアームを載せた機体を持ち上げるのは危険なので、**通電前に浮かせます**。
+> （接地状態が要る 4-b は、あとで一度停止してから行います。）
+>
 > **★ 起動時に一瞬トルクが抜けます。人が手を添えてから実行してください。**
 > 周囲 35cm を空けること。**この手順ではアームを動かす指令は送りません。**
 
-```bash
-make reach   # backend は既定で mock なので、実機は下記のように明示する
-```
+**★ 先に手順 2 のモックが完全に落ちていることを確認してください。**
+残っていると `/robot_description` の publisher が 2 になり、
+以降の TF がすべて信用できなくなります。
 
-ではなく、明示的に:
+```bash
+docker ps --format '{{.Names}}'    # 空であること。残っていたら make down
+```
 
 ```bash
 docker compose -f compose.yaml up -d
 docker compose exec -it lekiwi-so101-arm /entrypoint.sh \
   ros2 launch lekiwi_so101_bringup reach.launch.py \
-    backend:=lerobot robot_id:=<較正ID> start_rviz:=false
+    backend:=lerobot robot_id:=<手順1で調べた ID> start_rviz:=false
 ```
+
+（`make reach` は使いません。あれは `backend` が mock 既定なので、
+実機では上のように明示します。）
 
 報告してほしいもの:
 
@@ -189,36 +241,75 @@ $E ros2 run tf2_ros tf2_echo base_link arm_gripper_frame_link
 `tf2_echo base_link arm_gripper_frame_link` が出す Translation と、
 **実際の手先の位置を定規で測った値**を突き合わせてください。
 
-- URDF が正しければ 1cm 程度で一致するはずです
-- **大きくずれる場合、特に x と y が入れ替わっている・符号が逆なら、
-  取付の yaw が 0 ではありません**
+**★ どの姿勢で測ったかを必ず一緒に報告してください**
+（`ros2 topic echo /joint_states --once` の値）。姿勢が分からないと
+こちらで検算できません。
 
-両方の数値（TF の出力と実測値）を報告してください。
+こちらで現在の URDF から計算した期待値です。
+
+| 姿勢 | `base_link` 基準の手先 |
+| --- | --- |
+| **全関節ゼロ** | **(0.471, -0.040, 0.283)** |
+
+- 全関節ゼロなら、SO-101 は**ほぼ水平にまっすぐ前へ伸びた姿勢**になります
+- 1cm 程度で一致すれば取付は CAD どおりです
+- **x と y が入れ替わっている / 符号が逆なら、取付の yaw が 0 ではありません。**
+  その場合はどちらを向いているか（前・左・右・後）も報告してください
 
 サーボの温度と電圧も分かれば報告してください。
 
-**停止するときは launch 側で `Ctrl+C`。**
-（`docker compose down` では `exec` したプロセスに SIGINT が届かず、
-トルクが入ったまま残ります。）
+#### ★ この手順の終わり方（重要）
 
-### 手順 4 🟡 車輪を浮かせて短く動かす
+**`Ctrl+C` でトルクが切れてアームが落ちます。**
+今回は `make stow` を使えません（取付が未確定なのでアームを動かさない方針のため）。
+**唯一の安全策は人が支えたまま止めることです。**
 
-> **★ 必ず車輪を床から浮かせてブロック等に載せてから。**
+```
+1. 人がアームを支える                    ← ★ 先に手を添える
+2. launch を Ctrl+C                      ← ここでトルクが切れる
+3. アームが静止したのを確認してから手を放す
+4. docker compose -f compose.yaml down   ← ベース側を止める
+5. アームの電源スイッチ OFF
+```
+
+（`docker compose down` だけでは `exec` したプロセスに SIGINT が届かず、
+トルクが入ったまま残ります。必ず launch 側で `Ctrl+C` してください。）
+
+### 手順 4 🟡 車輪を浮かせたまま短く動かす
+
+> **★ 車輪は手順 3 で既に浮かせてあるはずです。** 接地していたら
+> いったん電源を切ってから浮かせてください（通電したまま持ち上げない）。
 
 手順 3 の状態のまま、別ターミナルで:
 
 ```bash
 E="docker exec lekiwi-so101-arm /entrypoint.sh"
-$E ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.05}}'
+$E ros2 topic pub -r 10 --times 20 /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.05}}'
 ```
+
+**★ `--once` ではなく `-r 10 --times 20`（2 秒間）にしてあります。**
+`--once` は discovery が終わる前に publisher が終了して 1 通も届かないことがあり、
+かつ `base_driver` の watchdog は 0.5 秒なので、1 通だけだとすぐ止まって
+観測できません。2 秒流すと watchdog の挙動も同時に見られます。
+
+**★ `/cmd_vel` は Nav2 の `collision_monitor` より下流です**
+（`nav2.yaml` は `cmd_vel_smoothed` → `cmd_vel`）。
+手打ちのこの指令に **Nav2 の安全機構は効きません**。車輪を浮かせている前提です。
 
 確認してほしいこと:
 
 1. `map`→`odom` が動くか（`$E ros2 run tf2_ros tf2_echo map odom`）
 2. **アームの TF が `base_link` に対して固定のままか**（動いたら結合 URDF がおかしい）
 3. `/joint_states` の Publisher count が 2 のままか
+4. 指令を止めて 0.5 秒後に車輪が止まるか（watchdog）
 
-#### 4-b 🟢 これも見てほしい（重要）
+終わったら**手順 3 の終了手順で一度すべて停止してください**（人が支えて `Ctrl+C`）。
+
+### 手順 4-b 🟢 車輪を接地させて、手で押す（重要）
+
+> **★ ここだけ車輪を接地させます。** アームは**電源 OFF のまま**で構いません。
+> ROS も動かす必要はありません（`base_driver` が指令ゼロを書いた後の
+> サーボの保持力を見るため、手順 4 の直後に停止した状態で行います）。
 
 **指令を送っていない状態で、機体を手で押して動きますか？**
 
