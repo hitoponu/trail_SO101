@@ -95,10 +95,11 @@ make down     # 2. コンテナを停止
 | `SUCCEEDED` | 完了。`residual_fk` は実際の関節角から順運動学で測り直した誤差 |
 | `REJECTED_UNREACHABLE` | 届かない。**張り付いた関節名**が出る（「遠すぎる」と「ベースを回すべき」の区別） |
 | `REJECTED_STALE_TF` | `map`→`odom` が古い。**slam_toolbox が止まっている可能性** |
+| `REJECTED_STALE_ODOM` | `/odom` が古い。**ベース側が止まっている可能性**。静止確認ができないので動かさない |
 | `REJECTED_NO_TF` | TF が引けない。tf2 のメッセージをそのまま出すので、どのリンクが無いか分かる |
 | `REJECTED_OUT_OF_RANGE` | 明らかに遠い。200 回反復する前の安い足切り |
 | `REJECTED_WRONG_FRAME` | `frame_id` が `map` でない |
-| `REJECTED_BELOW_FLOOR` | 床や天板に突っ込む |
+| `REJECTED_BELOW_FLOOR` | 床に突っ込む。**機体そのものは守らない**（下記） |
 | `REJECTED_BUSY` / `REJECTED_TOO_SOON` | 実行中 / 連打 |
 | `ABORTED_BASE_MOVED` | リーチ中にベースが動いたのでアクションをキャンセルした |
 | `FAILED_ACTION` | コントローラ側の失敗 |
@@ -131,9 +132,24 @@ make down     # 2. コンテナを停止
 | `laser_link` の位置 | **TBD 仮値 (0.10, 0, 0.03)。** xy が違うと回転時のてこ比として効き、地図が向き依存で歪む。その誤差がそのまま手先に乗る |
 | `arm_mount_link` の位置と **yaw** | CAD 由来で未実測。RViz でマゼンタのマーカーとして見える |
 | `joint_limit_overrides` | **空。** `laser_link` と `arm_mount_link` は xy で **44mm** しか離れていない。無通電でアームを手で振り、干渉する角度を調べてから埋めること |
-| `stow_positions` | 仮値。実機で低く畳んだ姿勢を測ること |
+| `stow_positions` | 暫定値 `[0, 0, 1.25, 1.31, 0]`。アーム基部の真上に折り畳み、手先は機体中心から水平 0.096m・高さ 0.112m（車輪円 0.125 と `robot_radius` 0.17 の内側）。**初回は必ず無通電で手を添え、干渉しないことを確かめること** |
 
 手順は `docs/agent/request.md` にある。
+
+## 故障したときに何が起きるか
+
+| 故障 | 影響範囲 | 復帰 |
+| --- | --- | --- |
+| アームのブリッジが fault（シリアル異常・watchdog） | **アームだけ**。トルクが切れて脱力する。`robot_state_publisher` は生き残るので、ベースの slam / Nav2 は測位を失わない | launch を上げ直す |
+| ベースのコンテナが停止 | `odom` が止まり slam が更新されない。アームの TF は残る。**リーチは `REJECTED_STALE_ODOM` で止まる** | `compose.yaml` は `restart: "no"` なので手動 |
+| **アームのコンテナを再起動** | RSP が一時的に消えるため slam がスキャンを落とし、`map`→`odom` が出なくなる。**自動では戻らない**（モックで確認） | **ベース側も再起動する**必要がある |
+| slam_toolbox が停止 | `map`→`odom` が凍る。**リーチは `REJECTED_STALE_TF` で止まる**（黙って古い座標で解かない） | slam を上げ直す |
+
+> ★ 合成構成では `follower.launch.py` を `shutdown_on_bridge_exit:=false` で
+> include している。単体アームでは既定の `true` で、ブリッジが落ちれば launch 全体が
+> 止まる。合成では同じ launch service に**結合ロボット唯一の RSP** が居るため、
+> そのままだとアームの故障で `base_footprint`→`laser_link` の TF まで消え、
+> **別コンテナの slam と Nav2 が巻き添えで測位を失う**。
 
 ## 既知のリスク
 

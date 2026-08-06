@@ -135,6 +135,12 @@ def generate_launch_description():
                 launch_arguments=[
                     ("start_robot_state_publisher", "false"),
                     ("start_rviz", "false"),
+                    # ★ ブリッジが落ちてもこの launch service は止めない。
+                    #   止めると同居している唯一の robot_state_publisher も死に、
+                    #   別コンテナの slam_toolbox / Nav2 が
+                    #   base_footprint -> laser_link を失って測位できなくなる。
+                    #   アームの故障をアームだけに閉じ込める。
+                    ("shutdown_on_bridge_exit", "false"),
                     ("backend", backend),
                     ("usb_port", usb_port),
                     ("robot_id", robot_id),

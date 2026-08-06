@@ -29,3 +29,16 @@ docker/lekiwi_bringup/.env
 docker/lekiwi_bringup/README.md
 docker/lekiwi_so101_bringup/.env
 docker/lekiwi_so101_bringup/README.md
+
+# ★ ワークスペースのビルド成果物と上流クローン。
+#   マウント方式へ移行してホスト側に生成されるようになったが、
+#   build context は docker/ の 2 つ上 (リポジトリ全体) なので、
+#   除外しないと毎ビルドで転送される (現時点で約 30MB)。
+#   どの Dockerfile もこれらを COPY していない
+#   (so101 は entrypoint.sh のみ、lekiwi_base は src/lekiwi_* のみ、
+#    rplidar は src/rplidar_bringup のみ)。
+#   CLAUDE.md の「LeKiwi/ は 289MB」と同じ話の再発。
+ros2_ws/build
+ros2_ws/install
+ros2_ws/log
+ros2_ws/src/ros2_so_arm

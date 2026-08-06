@@ -38,7 +38,13 @@ so101_reach_to_point:
     #   転倒は joint_limit_overrides（実機で手動確認）で抑えること。
     #   天板 0.216m 角に対し支持多角形は車輪円（半径 0.125m）しかない。
     max_reach_radius: 0.55
-    z_floor: 0.02
+    # ★ これは「床」のガードであって機体を守るものではない。
+    #   ベースプレートは base_footprint で z ∈ [0.025, 0.032]、
+    #   アームが載る plate2 の上面は 0.089。0.02 だとプレートの中を指す目標が通る。
+    #   0.035 まで上げてプレート本体は弾くが、その上の機体構造 (LiDAR 0.062、
+    #   plate2 0.089) は高さだけでは判別できない。そこは joint_limit_overrides
+    #   (実機で手動確認) の担当。
+    z_floor: 0.035
     floor_frame: base_footprint
 
     min_command_interval: 1.0
@@ -61,9 +67,18 @@ so101_reach_to_point:
     #   例: ["arm_shoulder_pan_joint:-1.2:1.2"]
     joint_limit_overrides: [""]
 
-    # ★ 実測待ち。低く畳んだ姿勢。停止前に /so101/stow で呼ぶこと
-    #   （正常終了でトルクが切れてアームが落ちるため）。
-    stow_positions: [0.0, -1.4, 1.4, 0.6, 0.0]
+    # ★ 実測待ちの暫定値だが、安全側に倒してある。
+    #   アーム基部 (base_footprint で 0.080,-0.040) のほぼ真上に折り畳む姿勢。
+    #   手先は base_footprint で (0.087,-0.040,0.112)、機体中心から水平 0.096m で
+    #   車輪円 (半径0.125) と nav2 の robot_radius 0.17 の内側に収まる。
+    #   shoulder_pan=0 なので LiDAR / カメラマウント側へ振らない。
+    #
+    #   ★ 以前の [0.0,-1.4,1.4,0.6,0.0] は「畳んだつもり」で実際は
+    #     水平 0.307m・高さ 0.161m に伸びており、robot_radius も車輪円も
+    #     大きく外れていた (FK で確認)。トルクが切れると前方へ倒れる。
+    #
+    #   ★ 初回は必ず無通電で手を添え、干渉しないことを確かめてから使うこと。
+    stow_positions: [0.0, 0.0, 1.25, 1.31, 0.0]
 
     solver_tolerance: 0.005
     solver_max_iterations: 200

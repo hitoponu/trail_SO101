@@ -27,6 +27,7 @@ def generate_launch_description():
     description_file = LaunchConfiguration("description_file")
     joint_prefix = LaunchConfiguration("joint_prefix")
     start_robot_state_publisher = LaunchConfiguration("start_robot_state_publisher")
+    shutdown_on_bridge_exit = LaunchConfiguration("shutdown_on_bridge_exit")
     start_rviz = LaunchConfiguration("start_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
 
@@ -158,6 +159,11 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "start_robot_state_publisher", default_value="true"
             ),
+            # false にするとブリッジが落ちても launch 全体は止めない。
+            # 合成構成 (lekiwi_so101_bringup) で使う。理由は下の条件を参照。
+            DeclareLaunchArgument(
+                "shutdown_on_bridge_exit", default_value="true"
+            ),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument(
                 "rviz_config",
@@ -185,7 +191,17 @@ def generate_launch_description():
                 OnProcessExit(
                     target_action=bridge,
                     on_exit=[EmitEvent(event=Shutdown(reason="LeRobot bridge exited"))],
-                )
+                ),
+                # ★ Shutdown は launch service 全体 -- include 元も含めて -- を落とす。
+                #   アーム単体ならそれでよいが、合成構成では同じ launch service に
+                #   **結合ロボット唯一の robot_state_publisher** が居る。そのままだと
+                #   シリアルが一度こけてブリッジが fault した瞬間に
+                #   base_footprint -> base_link -> laser_link の TF が消え、
+                #   別コンテナの slam_toolbox と Nav2 が測位を失う
+                #   (ベースのコンテナは restart:"no" なので自力復帰しない)。
+                #   アームの故障がロボット全体の故障に波及しないよう、
+                #   合成側は false にして RSP を生かしたままにする。
+                condition=IfCondition(shutdown_on_bridge_exit),
             ),
             Node(
                 package="rviz2",
