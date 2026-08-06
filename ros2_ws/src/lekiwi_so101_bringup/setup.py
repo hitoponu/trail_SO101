@@ -18,6 +18,11 @@ setup(
         (os.path.join("share", package_name, "rviz"), glob("rviz/*.rviz")),
     ],
     install_requires=["setuptools"],
+    entry_points={
+        "console_scripts": [
+            "env_camera_calib = lekiwi_so101_bringup.env_camera_calib:main",
+        ],
+    },
     zip_safe=True,
     maintainer="maintainer",
     maintainer_email="maintainer@example.com",

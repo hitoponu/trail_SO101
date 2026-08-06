@@ -26,6 +26,7 @@ def generate_launch_description():
     color_height = LaunchConfiguration("color_height")
     color_fps = LaunchConfiguration("color_fps")
     enable_pointcloud = LaunchConfiguration("enable_pointcloud")
+    enable_imu = LaunchConfiguration("enable_imu")
     align_depth = LaunchConfiguration("align_depth")
     decimation = LaunchConfiguration("decimation")
     start_rviz = LaunchConfiguration("start_rviz")
@@ -68,6 +69,12 @@ def generate_launch_description():
             description="/<ns>/<name>/depth/color/points を出す",
         ),
         DeclareLaunchArgument(
+            "enable_imu",
+            default_value="false",
+            description="★ 環境固定での較正に使う。静止しているので加速度計は "
+                        "純粋な重力を読み、roll/pitch がシーンに依らず決まる",
+        ),
+        DeclareLaunchArgument(
             "align_depth",
             default_value="false",
             description="★ 点群には無関係 (点群フィルタは align より前に適用される)。"
@@ -99,7 +106,9 @@ def generate_launch_description():
                 "enable_depth": True,
                 "enable_infra1": False,
                 "enable_infra2": False,
-                "enable_accel": False,
+                # ★ 環境固定の較正では加速度計を使う (重力 -> roll/pitch)。
+                #   ジャイロは静止しているので不要。
+                "enable_accel": enable_imu,
                 "enable_gyro": False,
                 "depth_module.profile": profile(depth_width, depth_height, depth_fps),
                 "rgb_camera.profile": profile(color_width, color_height, color_fps),

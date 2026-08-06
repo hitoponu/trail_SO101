@@ -188,6 +188,8 @@ services:
       - camera_name:=${ENV_CAMERA_NAME:-env_camera}
       - camera_namespace:=${ENV_CAMERA_NAME:-env_camera}
       - enable_pointcloud:=true
+      # ★ 較正で重力から roll/pitch を出すのに使う。
+      - enable_imu:=true
       - depth_fps:=${ENV_CAMERA_FPS:-6}
       - color_fps:=${ENV_CAMERA_FPS:-6}
       - decimation:=${ENV_CAMERA_DECIMATION:-2}

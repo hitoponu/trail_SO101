@@ -62,6 +62,7 @@ ROS 2 Jazzy の構成は `docker/` 以下にまとめてある。ROS 2 パッケ
 | SO-101 フォロワアーム | LeRobotバックエンドと薄いROSブリッジで`FollowJointTrajectory`とグリッパを提供 | [docker/so101_ros2/README.md](docker/so101_ros2/README.md) |
 | LeKiwi ベース | 3輪オムニベースを `/cmd_vel` で駆動し、オドメトリと TF を出す | [docker/lekiwi_base_ros2/README.md](docker/lekiwi_base_ros2/README.md) |
 | LeKiwi + SO-101（リーチ） | ベースにアームを載せ、`map` 上の点へ手先を伸ばす | **[docs/lekiwi_so101_reach.md](docs/lekiwi_so101_reach.md)**（概要）/ [docker/lekiwi_so101_bringup/README.md](docker/lekiwi_so101_bringup/README.md)（運用） |
+| 環境固定 RealSense（リーチ目標の指定） | 据え置きカメラの点群を `map` に載せ、点をクリックしてリーチ | [docs/env_camera_calibration.md](docs/env_camera_calibration.md)（較正手順） |
 | RPLIDAR A1M8 | 2DスキャンをPointCloud2へ変換してRViz 2で表示 | [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md) |
 | RealSense D435i | D435i を起動してRViz 2で表示 | [docker/realsense_ros2/README.md](docker/realsense_ros2/README.md) |
 

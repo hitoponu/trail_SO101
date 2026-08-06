@@ -120,6 +120,14 @@ def generate_launch_description():
             DeclareLaunchArgument("start_env_camera_tf", default_value="false"),
             DeclareLaunchArgument("env_camera_name", default_value="env_camera"),
             DeclareLaunchArgument("mock_optical_frames", default_value="false"),
+            # ★ 較正値。env_camera_calib の出力を .env 経由で渡す。
+            #   既定は未実測の仮値 (env_camera.launch.py の既定と同じ)。
+            DeclareLaunchArgument("env_camera_x", default_value="1.5"),
+            DeclareLaunchArgument("env_camera_y", default_value="0.0"),
+            DeclareLaunchArgument("env_camera_z", default_value="1.0"),
+            DeclareLaunchArgument("env_camera_roll", default_value="0.0"),
+            DeclareLaunchArgument("env_camera_pitch", default_value="0.4"),
+            DeclareLaunchArgument("env_camera_yaw", default_value="3.14159"),
             # ★ 実測待ち。arm_mount_link から見たアーム基部の姿勢。
             #   arm_mount_link 自体 (base_link から 0.08,-0.04,0.057) も CAD 由来で未実測。
             #   docs/agent/request.md の手順 0 / 3 で確定させる。
@@ -167,6 +175,9 @@ def generate_launch_description():
                 launch_arguments=[
                     ("camera_name", env_camera_name),
                     ("mock_optical_frames", mock_optical_frames),
+                ] + [
+                    (f"env_camera_{k}", LaunchConfiguration(f"env_camera_{k}"))
+                    for k in ("x", "y", "z", "roll", "pitch", "yaw")
                 ],
                 condition=IfCondition(start_env_camera_tf),
             ),

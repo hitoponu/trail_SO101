@@ -76,16 +76,23 @@ def kabsch2d(source, target) -> tuple[float, float, float]:
     return float(translation[0]), float(translation[1]), yaw
 
 
-def _nearest(source, target) -> tuple[np.ndarray, np.ndarray]:
+def _nearest(source, target, chunk: int = 256) -> tuple[np.ndarray, np.ndarray]:
     """総当たりの最近傍。scipy が無いので numpy で書く。
 
-    地図の占有セルは数千点、スライスした点群も間引いて数千点なので、
-    数千×数千の距離行列（数十 MB）で十分収まる。
+    ★ source をチャンクに切って処理する。素直に (N, M, 2) の差分を作ると
+      点群 4000 点 × 地図 3000 セルで 200MB 近くになり、実機の PC で
+      メモリを圧迫する。チャンク化すればピークは chunk x M に抑えられる。
     """
-    diff = source[:, None, :] - target[None, :, :]
-    distances = np.einsum("ijk,ijk->ij", diff, diff)
-    index = np.argmin(distances, axis=1)
-    return index, np.sqrt(distances[np.arange(len(source)), index])
+    index = np.empty(len(source), dtype=np.intp)
+    distance = np.empty(len(source), dtype=float)
+    for start in range(0, len(source), chunk):
+        stop = min(start + chunk, len(source))
+        diff = source[start:stop, None, :] - target[None, :, :]
+        squared = np.einsum("ijk,ijk->ij", diff, diff)
+        nearest = np.argmin(squared, axis=1)
+        index[start:stop] = nearest
+        distance[start:stop] = np.sqrt(squared[np.arange(stop - start), nearest])
+    return index, distance
 
 
 def match(
