@@ -61,6 +61,32 @@ Visualization Manager:
       Style: Points
       Color: 255; 85; 0
       Color Transformer: FlatColor
+    # 環境固定 RealSense の点群。
+    # ★ 既定は無効。有効にすると帯域を食う (realsense2_camera は購読者ゼロなら
+    #   点群の生成自体をスキップするので、切っている間はコストがゼロ)。
+    # ★ Style は Points にしないこと。スクリーン 1px になり、
+    #   Publish Point で狙って当てるのが困難になる。
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Env Camera Cloud
+      Enabled: false
+      Topic:
+        Value: /env_camera/env_camera/depth/color/points
+        Depth: 2
+        Durability Policy: Volatile
+        # ★ launch 側で pointcloud_qos: SENSOR_DATA にしてあるので Best Effort。
+        Reliability Policy: Best Effort
+      Style: Flat Squares
+      Size (m): 0.015
+      Decay Time: 0
+      Color Transformer: RGB8
+      Selectable: true
+    # 較正結果の姿勢を目で見るため。
+    - Class: rviz_default_plugins/Axes
+      Name: Env Camera
+      Enabled: true
+      Reference Frame: env_camera_link
+      Length: 0.3
+      Radius: 0.01
     # リーチ目標。緑 = 受理、赤 = 棄却。
     - Class: rviz_default_plugins/Marker
       Name: Reach Target
@@ -80,6 +106,11 @@ Visualization Manager:
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
       Line color: 128; 128; 0
+    # ★ amcl の初期姿勢を与えるツール。保存地図構成では必須
+    #   (amcl は起動直後は自己位置が未確定)。以前は入っていなかった。
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
     # ★ これがリーチ目標の入力。PointStamped を /clicked_point へ出す。
     - Class: rviz_default_plugins/PublishPoint
       Single click: true

@@ -4,7 +4,8 @@
 #   make build       イメージをビルド
 #   make bootstrap   ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
 #   make mock        実機に触れないモック構成で起動 (Mac 可)
-#   make reach       実機で起動 (要 .env、要 udev ルール)
+#   make reach       実機で起動 (SLAM。地図を作る)
+#   make reach-with-map  実機で起動 (保存地図 + amcl)。★ 環境固定カメラを使うならこちら
 #   make shell       アームのコンテナに入る
 #   make stow        アームを低く畳む (★ 停止前に必ず実行する)
 #   make save-map    現在の地図を保存
@@ -29,10 +30,12 @@ E        := /entrypoint.sh
 #   いちばん有力な二重 publisher は「モック構成のアームコンテナ」なので
 #   必ず入れること (以前これが抜けていた)。
 #   rplidar-a1 はこのスタック自身が使うので対象外。
-CONFLICTS_FOR_REACH := so101-follower lekiwi-base lekiwi-nav-mock lekiwi-so101-arm-mock
-CONFLICTS_FOR_MOCK  := so101-follower lekiwi-base lekiwi-nav lekiwi-so101-arm
+# ★ realsense-d435i (単体スタック) はドメインが違っても**同じ USB デバイスを
+#   奪い合う**ので、ドメイン衝突とは別の理由で必ず対象に入れる。
+CONFLICTS_FOR_REACH := so101-follower lekiwi-base lekiwi-nav-mock lekiwi-so101-arm-mock realsense-d435i
+CONFLICTS_FOR_MOCK  := so101-follower lekiwi-base lekiwi-nav lekiwi-so101-arm realsense-d435i
 
-.PHONY: build bootstrap mock reach shell stow save-map check down logs guard guard-mock
+.PHONY: build bootstrap mock reach reach-with-map shell stow save-map check down logs guard guard-mock
 
 # ★ アーム側は ros2_ws をホストからマウントする方式なので、
 #   イメージをビルドしただけでは install/ が空で launch できない。
@@ -71,6 +74,16 @@ reach: guard
 	mkdir -p $${MAP_DIR:-$$HOME/maps}
 	docker compose -f compose.yaml up
 
+# ★ 環境固定 RealSense を使うならこちら。
+#   固定カメラの較正値は map 原点に紐づくので、SLAM で毎回地図を作り直すと
+#   起動のたびに無効になる。保存地図 + amcl なら map が毎回同じ物理フレームになる。
+reach-with-map: guard
+	@test -f .env || { echo "ERROR: .env が無い。cp .env.example .env して編集すること" >&2; exit 1; }
+	@test -f "$${MAP_DIR:-$$HOME/maps}/$(MAP_NAME).yaml" || { \
+	  echo "ERROR: 地図が無い: $${MAP_DIR:-$$HOME/maps}/$(MAP_NAME).yaml" >&2; \
+	  echo "       先に make reach で走らせて make save-map すること。" >&2; exit 1; }
+	docker compose -f compose.with_map.yaml up
+
 shell:
 	docker exec -it $(ARM) bash
 
@@ -105,6 +118,10 @@ check:
 	docker exec $$C $(E) ros2 topic info /joint_states | grep 'Publisher count'; \
 	echo "--- controllers (期待: active 3 つ) ---"; \
 	docker exec $$C $(E) ros2 control list_controllers; \
+	echo "--- map -> env_camera_depth_optical_frame ---"; \
+	docker exec $$C $(E) timeout 5 \
+	  ros2 run tf2_ros tf2_echo map env_camera_depth_optical_frame 2>/dev/null \
+	  | grep -a Translation | head -1 || echo "  (カメラ TF 無し)"; \
 	echo "--- map -> arm_gripper_frame_link ---"; \
 	docker exec $$C $(E) timeout 5 \
 	  ros2 run tf2_ros tf2_echo map arm_gripper_frame_link 2>/dev/null \

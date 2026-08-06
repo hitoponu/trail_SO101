@@ -1,36 +1,27 @@
-# LeKiwi ベース + RPLIDAR + SO-101 アーム。map 上の点へリーチする実機用 compose。
+# 保存済み地図 + amcl で動かす compose（環境固定 RealSense を使うならこちら）。
 #
-#   cp .env.example .env   # 先に実機に合わせて編集する
-#   docker compose build
-#   docker compose up
+#   docker compose -f compose.with_map.yaml up
 #
-# ■ なぜ 3 コンテナに分けるのか
-#   2 つのサブシステムで安全論理が逆だから。
+# ■ ★ なぜ SLAM ではなくこちらが要るのか
+#   slam_toolbox は**起動位置を原点に毎回新しい map** を作る。
+#   環境固定カメラの較正値 (map -> env_camera_link) は特定の map 原点に
+#   紐づくので、SLAM モードでは**起動のたびに較正が無効**になる。
 #
-#                  正常停止 (SIGINT)        SIGKILL
-#     アーム        トルク OFF → 落ちる      保持 → 凍る
-#     ベース        停止 → 安全              最後の指令速度で回り続ける
+#   保存地図の yaml は origin: を持つので、同じ yaml を読む限り map は
+#   毎回同じ物理フレームになる。だから固定カメラは amcl 構成が前提。
 #
-#   stop_signal / stop_grace_period はサービス単位にしか設定できないので、
-#   1 コンテナにまとめると逆向きの故障モードに 1 つの停止方針を強いることになる。
-#   デバイスも 1 対 1 で対応する (/dev/lekiwi, /dev/rplidar, /dev/so101_follower)。
+# ■ 事前準備
+#   1. compose.yaml (SLAM) で地図を作る → make save-map MAP_NAME=my_room
+#   2. 床に「ホーム位置」をテープで印す
+#   3. .env の MAP_NAME を合わせる
 #
-# ■ robot_state_publisher と RViz は lekiwi-so101-arm が 1 つだけ持つ
-#   3 つの description をすべて $(find) できる唯一のコンテナだから。
-#   ベース側は start_robot_state_publisher:=false で起動する
-#   (reach.launch.py が nav.launch.py へ渡す)。
+# ■ ★ amcl は起動直後は自己位置が未確定
+#   RViz の "2D Pose Estimate" で初期姿勢を与えるか、nav2.yaml の amcl に
+#   set_initial_pose / initial_pose を設定する。後者のほうが再現性が高く、
+#   較正値の劣化も抑えられる。
 #
-# ■ 起動前チェック
-#   * .env の 3 つのデバイスが実機に合っていること (udev ルール必須)
-#   * ★ アームは 7.4V、ホイールは 12V。同一シリアルバスへ繋がないこと
-#   * URDF の laser_link 位置と arm_mount 位置が実測値に更新済みであること
-#     (TBD の仮値のままだと地図が歪み、その誤差がそのまま手先に乗る)
-#
-# ■ 停止手順
-#   1. docker exec lekiwi-so101-arm /entrypoint.sh \
-#        ros2 service call /so101/stow std_srvs/srv/Trigger {}
-#   2. アームのコンテナを止める (トルクが切れるので低い姿勢から落とす)
-#   3. ベースを止める
+# ■ compose.mock.yaml と同じ理由で**単独ファイル**にしてある
+#   Compose は devices: をマージするので、オーバーレイでは差し替えられない。
 
 services:
   lekiwi-nav:
@@ -60,11 +51,12 @@ services:
       - ros2
       - launch
       - lekiwi_base_bringup
-      - nav.launch.py
+      - nav_with_map.launch.py
+      # ★ MAP_DIR がコンテナの /maps にマウントされている。
+      - map_file:=/maps/${MAP_NAME:-my_room}.yaml
       - port:=${LEKIWI_DEVICE:-/dev/lekiwi}
       - start_robot_state_publisher:=false
       - start_rviz:=false
-      # sllidar_node は rplidar コンテナが担当する
       - start_lidar:=false
     restart: "no"
     stop_signal: SIGINT

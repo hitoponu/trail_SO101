@@ -51,6 +51,9 @@ def generate_launch_description():
     rviz_config = LaunchConfiguration("rviz_config")
     controllers_file = LaunchConfiguration("controllers_file")
     reach_params_file = LaunchConfiguration("reach_params_file")
+    start_env_camera_tf = LaunchConfiguration("start_env_camera_tf")
+    env_camera_name = LaunchConfiguration("env_camera_name")
+    mock_optical_frames = LaunchConfiguration("mock_optical_frames")
 
     mount_keys = ("x", "y", "z", "roll", "pitch", "yaw")
 
@@ -110,6 +113,13 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "rviz_config", default_value=str(share / "rviz" / "reach.rviz")
             ),
+            # ★ 環境固定 RealSense の map -> env_camera_link。
+            #   RViz と同じプロセスに置くことで「点群が出ない」の切り分けが
+            #   1 箇所で済む (TF が無い / 点群が来ていない / RViz の設定、の区別)。
+            #   カメラそのものは別コンテナ (lekiwi-realsense) が起動する。
+            DeclareLaunchArgument("start_env_camera_tf", default_value="false"),
+            DeclareLaunchArgument("env_camera_name", default_value="env_camera"),
+            DeclareLaunchArgument("mock_optical_frames", default_value="false"),
             # ★ 実測待ち。arm_mount_link から見たアーム基部の姿勢。
             #   arm_mount_link 自体 (base_link から 0.08,-0.04,0.057) も CAD 由来で未実測。
             #   docs/agent/request.md の手順 0 / 3 で確定させる。
@@ -148,6 +158,17 @@ def generate_launch_description():
                     ("joint_prefix", joint_prefix),
                     ("controllers_file", controllers_file),
                 ],
+            ),
+            # ---- 環境固定カメラの static TF ----
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    str(share / "launch" / "env_camera.launch.py")
+                ),
+                launch_arguments=[
+                    ("camera_name", env_camera_name),
+                    ("mock_optical_frames", mock_optical_frames),
+                ],
+                condition=IfCondition(start_env_camera_tf),
             ),
             # ---- リーチ ----
             Node(

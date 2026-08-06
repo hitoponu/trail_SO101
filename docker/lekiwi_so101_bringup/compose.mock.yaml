@@ -84,6 +84,10 @@ services:
       - reach.launch.py
       - backend:=mock
       - start_rviz:=${MOCK_START_RVIZ:-false}
+      # ★ カメラ実機が無い環境でも、static TF と模擬光学フレームだけ出して
+      #   map -> env_camera_depth_optical_frame の疎通と座標変換の向きを検証する。
+      - start_env_camera_tf:=true
+      - mock_optical_frames:=true
     restart: "no"
     stop_signal: SIGINT
     stop_grace_period: 20s
