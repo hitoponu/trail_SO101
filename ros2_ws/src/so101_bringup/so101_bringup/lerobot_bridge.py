@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 
 import rclpy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
@@ -47,7 +50,9 @@ class SO101LeRobotBridge(Node):
             float(self.get_parameter("command_timeout").value)
         )
         self._velocity = VelocityEstimator()
+        self._command_lock = threading.Lock()
         self._command: dict[str, float] | None = None
+        self._last_cycle_duration = 0.0
         self._fault: Exception | None = None
         self._closed = False
 
@@ -64,14 +69,40 @@ class SO101LeRobotBridge(Node):
             raise ValueError("backend must be either 'mock' or 'lerobot'")
 
         self._backend.connect()
+
+        # ★ タイマ (シリアル I/O) とサブスクリプションを別グループに置き、
+        #   MultiThreadedExecutor で回す。
+        #
+        #   両方をノード既定の MutuallyExclusiveCallbackGroup に入れると、
+        #   _control_cycle がシリアル I/O でブロックしている間
+        #   _command_callback が一切呼ばれない。lerobot のパケットタイムアウトは
+        #   1パケット約 50ms、sync_read は6モータを逐次読むので、通信が一度こけると
+        #   1サイクルで 300ms 前後ブロックしうる。それが2回続くと、指令は正常に
+        #   届いているのに watchdog が期限切れになる (誤発火)。
+        #   グループを分ければ、I/O 中でも指令の受信と mark() が進む。
+        self._io_group = MutuallyExclusiveCallbackGroup()
+        self._command_group = MutuallyExclusiveCallbackGroup()
+
         self._state_publisher = self.create_publisher(
             JointState, "/so101/hardware_states", qos_profile_sensor_data
         )
         self.create_subscription(
-            JointState, "/so101/hardware_commands", self._command_callback, 1
+            JointState,
+            "/so101/hardware_commands",
+            self._command_callback,
+            1,
+            callback_group=self._command_group,
         )
-        self.create_service(Trigger, "/so101/lerobot_bridge/ready", self._ready)
-        self.create_timer(1.0 / update_rate, self._control_cycle)
+        self.create_service(
+            Trigger,
+            "/so101/lerobot_bridge/ready",
+            self._ready,
+            callback_group=self._command_group,
+        )
+        self.create_timer(
+            1.0 / update_rate, self._control_cycle, callback_group=self._io_group
+        )
+        self._period = 1.0 / update_rate
         self.get_logger().info(f"SO-101 bridge ready with backend={backend_name}")
 
     @property
@@ -86,17 +117,29 @@ class SO101LeRobotBridge(Node):
     def _command_callback(self, message: JointState) -> None:
         try:
             ordered = ordered_ros_positions(message.name, message.position)
-            self._command = ros_to_lerobot(ordered, self._gripper_limit)
-            self._watchdog.mark()
+            command = ros_to_lerobot(ordered, self._gripper_limit)
         except InvalidJointCommand as exc:
             self.get_logger().error(f"Rejected hardware command: {exc}")
+            return
+        with self._command_lock:
+            self._command = command
+        self._watchdog.mark()
 
     def _control_cycle(self) -> None:
+        started = time.monotonic()
         try:
             if self._watchdog.expired():
-                raise TimeoutError("hardware command watchdog expired")
-            if self._command is not None:
-                self._backend.write_positions(self._command)
+                # 誤発火の切り分けに必要なので、原因の手掛かりを必ず残す。
+                raise TimeoutError(
+                    "hardware command watchdog expired "
+                    f"(timeout={self._watchdog.timeout:.3f}s, "
+                    f"last cycle={self._last_cycle_duration * 1e3:.1f}ms, "
+                    f"period={self._period * 1e3:.1f}ms)"
+                )
+            with self._command_lock:
+                command = self._command
+            if command is not None:
+                self._backend.write_positions(command)
             ros_positions = lerobot_to_ros(
                 self._backend.read_positions(), self._gripper_limit
             )
@@ -107,6 +150,15 @@ class SO101LeRobotBridge(Node):
             message.position = [ros_positions[name] for name in ROS_JOINTS]
             message.velocity = [velocities[name] for name in ROS_JOINTS]
             self._state_publisher.publish(message)
+            self._last_cycle_duration = time.monotonic() - started
+            # 周期を超えたサイクルは executor を圧迫する。watchdog 誤発火の
+            # 前兆なので記録する (throttle 付きでログを溢れさせない)。
+            if self._last_cycle_duration > self._period:
+                self.get_logger().warning(
+                    f"control cycle overran: {self._last_cycle_duration * 1e3:.1f}ms "
+                    f"> period {self._period * 1e3:.1f}ms",
+                    throttle_duration_sec=1.0,
+                )
         except Exception as exc:  # noqa: BLE001 - any I/O error must safe-stop
             self._fault = exc
             self.get_logger().fatal(f"SO-101 bridge fault: {exc}")
@@ -127,7 +179,14 @@ def main(args=None) -> None:
     exit_code = 0
     try:
         node = SO101LeRobotBridge()
-        rclpy.spin(node)
+        # ★ SingleThreadedExecutor だとシリアル I/O 中に指令を受け取れず、
+        #   watchdog が誤発火する。グループを分けた意味が出るのは複数スレッド時のみ。
+        executor = MultiThreadedExecutor(num_threads=2)
+        executor.add_node(node)
+        try:
+            executor.spin()
+        finally:
+            executor.remove_node(node)
         if node.faulted:
             exit_code = 1
     except Exception as exc:  # noqa: BLE001 - process boundary reports startup faults
