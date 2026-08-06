@@ -17,6 +17,9 @@ wheels/
 captured_images/
 outputs/
 
+# SLAM で保存した地図 (docker/lekiwi_bringup の MAP_DIR 既定値)
+maps/
+
 # colcon
 ros2_ws/install/
 ros2_ws/log/
