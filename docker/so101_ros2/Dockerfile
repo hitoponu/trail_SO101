@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pynput \
       python3-vcstool \
       python3-yaml \
+      ros-jazzy-moveit \
+      ros-jazzy-moveit-setup-assistant \
       ros-jazzy-joint-state-topic-hardware-interface \
       ros-jazzy-joint-state-broadcaster \
       ros-jazzy-joint-state-publisher-gui \

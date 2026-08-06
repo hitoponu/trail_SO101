@@ -1,0 +1,21 @@
+# MoveIt-only limits used by trajectory time parameterization.
+#
+# The URDF does not provide acceleration limits. These conservative software
+# limits are required by AddTimeOptimalParameterization and are independent of
+# the servo register's acceleration value.
+joint_limits:
+  shoulder_pan_joint:
+    has_acceleration_limits: true
+    max_acceleration: 2.0
+  shoulder_lift_joint:
+    has_acceleration_limits: true
+    max_acceleration: 2.0
+  elbow_flex_joint:
+    has_acceleration_limits: true
+    max_acceleration: 2.0
+  wrist_flex_joint:
+    has_acceleration_limits: true
+    max_acceleration: 2.0
+  wrist_roll_joint:
+    has_acceleration_limits: true
+    max_acceleration: 2.0
