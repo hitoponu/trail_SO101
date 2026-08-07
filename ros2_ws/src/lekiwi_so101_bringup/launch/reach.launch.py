@@ -183,9 +183,10 @@ def generate_launch_description():
                 default_value=os.environ.get(f"WRIST_CAMERA_{key.upper()}", ""),
                 description="空なら URDF の既定値を使う")
               for key in mount_keys),
-            # ★ 実測待ち。arm_mount_link から見たアーム基部の姿勢。
-            #   arm_mount_link 自体 (base_link から 0.08,-0.04,0.057) も CAD 由来で未実測。
-            #   docs/agent/request.md の手順 0 / 3 で確定させる。
+            # arm_mount_link から見たアーム基部の姿勢。既定の 0 は「補正なし」。
+            #   ★ arm_mount_link 自体は**実測済み** (2026-08-07)。
+            #     base_link から (0.08, 0.00, 0.057), rpy=0。
+            #     CAD の y=-0.04 は誤りで、実測は y=0 だった (docs/agent/report.md)。
             *(
                 DeclareLaunchArgument(f"arm_mount_{key}", default_value="0.0")
                 for key in mount_keys

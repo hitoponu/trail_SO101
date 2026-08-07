@@ -48,6 +48,17 @@ services:
     #   特権で動くことになる (承知のうえ)。
     privileged: true
 
+    # ★ privileged: true があると Docker は下の devices: を**無視する**
+    #   (特権コンテナは最初から全デバイスにアクセスできる)。実測で確認:
+    #     privileged 有り + 存在しないデバイス -> 起動する (exit 0)
+    #     privileged 無し + 存在しないデバイス -> "error gathering device
+    #                                             information" で起動しない
+    #   つまりこの一覧は「どのデバイスを使うか」の**ドキュメント**として効いており、
+    #   デバイスが 1 つ欠けても make release は起動できる (緊急用の経路として重要)。
+    #
+    #   ★ もし privileged を外すなら、この一覧は途端に**強い前提**に変わる。
+    #     アームの電源を切って /dev/so101_follower が消えた状態では
+    #     コンテナが起動できなくなり、ホイールを止めに行けなくなる。
     devices:
       - ${LEKIWI_DEVICE:-/dev/lekiwi}:${LEKIWI_DEVICE:-/dev/lekiwi}
       - ${RPLIDAR_DEVICE:-/dev/rplidar}:${RPLIDAR_DEVICE:-/dev/rplidar}

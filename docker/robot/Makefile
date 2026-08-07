@@ -10,6 +10,7 @@
 #   make stow        アームを低く畳む (★ 停止前に必ず実行する)
 #   make save-map    現在の地図を保存
 #   make check       ROS グラフの不変条件を確認
+#   make release-check ★ トルクが入っているかを読むだけ (何も書かない)
 #   make release     ★ 異常終了後にホイールとアームを解放する
 #   make down        コンテナを停止・削除
 #
@@ -52,7 +53,7 @@ CONFLICTS_FOR_REAL := $(LEGACY) $(SVC_MOCK)
 CONFLICTS_FOR_MOCK := $(LEGACY) $(SVC)
 
 .PHONY: build bootstrap up run mock shell stow save-map check release \
-        release-wheels down logs guard guard-mock
+        release-wheels release-check down logs guard guard-mock
 
 build:
 	docker compose -f compose.yaml build
@@ -166,18 +167,50 @@ check:
 	echo "--- map -> arm_gripper_frame_link ---"; \
 	$(call echo_tf,$$C,map,arm_gripper_frame_link,RSP かコントローラが未起動)
 
+# ★★ robot コンテナが動いている間はシリアルバスを触らせない。
+#
+#   Feetech のバスは**半二重でマスタが 1 つしか居られない**。launch がポートを
+#   開いたまま release_all が読み書きすると**パケットが混線し、ブリッジが通信異常と
+#   判定してトルクを切る**（＝アームがその場で落ちる）。
+#   「読むだけだから安全」は成り立たない。読むにも送信が要るため。
+#
+#   ★ 異常終了からの復帰では、そもそもコンテナは死んでいるのでここは通る。
+#     ここで止まるのは「launch が生きているのに release を叩いた」ときだけで、
+#     その場合の正解は make down（または launch を Ctrl+C）。
+define guard_serial_bus
+	@if [ -n "$$(docker ps -q -f name=^$(SVC)$$)" ]; then \
+	  echo "ERROR: コンテナ $(SVC) が動いています。" >&2; \
+	  echo "       Feetech のバスはマスタが 1 つだけ。launch が開いたまま" >&2; \
+	  echo "       触ると混線し、ブリッジが通信異常と判定してトルクを切ります" >&2; \
+	  echo "       （★ アームがその場で落ちます）。" >&2; \
+	  echo "       先に launch を Ctrl+C するか make down してから実行すること。" >&2; \
+	  exit 1; \
+	fi
+endef
+
 # ★ 異常終了 (SIGKILL / OOM / コンテナ強制削除) からの復帰。
 #   ホイールを止めてアームのトルクを切る。ROS は使わない。
-#   ★ 先に make down すること。ROS のノードが生きているとポートを掴んでいる。
 #   ★ アームは支えが無ければ落ちる。人が支えてから実行すること。
 release:
+	$(call guard_serial_bus)
 	docker compose -f compose.yaml run --rm $(SVC) $(E) \
 		ros2 run lekiwi_so101_bringup release_all
 
 # ホイールだけ止める (アームは落ちない)。走り出したときの一次対応。
 release-wheels:
+	$(call guard_serial_bus)
 	docker compose -f compose.yaml run --rm $(SVC) $(E) \
 		ros2 run lekiwi_so101_bringup release_all --only wheels --yes
+
+# ★ 読むだけ。何も書き込まないので**それ自体では**アームは落ちない。
+#   ただし launch 稼働中は上の guard で止める（混線でブリッジが落とすため）。
+#   「いまトルクが入っているのか」の確認。release の前後で比べる。
+#   ★ exit 1 は「トルクが入っている / 読めない」の意味で、異常とは限らない。
+#     make は `Error 1` と表示するが、解放前に叩けばそれが期待どおり。
+release-check:
+	$(call guard_serial_bus)
+	docker compose -f compose.yaml run --rm $(SVC) $(E) \
+		ros2 run lekiwi_so101_bringup release_all --dry-run
 
 down:
 	docker compose -f compose.yaml down

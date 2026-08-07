@@ -151,7 +151,15 @@ make release-wheels  # ホイールだけ（アームは落ちない）
 実体は ROS を一切使わず、シリアルポートを直接開く:
 
 ```bash
-ros2 run lekiwi_so101_bringup release_all [--only both|wheels|arm] [--yes]
+ros2 run lekiwi_so101_bringup release_all [--only both|wheels|arm] [--yes] [--dry-run]
+```
+
+`--dry-run` は `Torque_Enable` を**読むだけで一切書き込まない**。
+「いまトルクが入っているのか」を確かめたいときに使う（アームは落ちない）。
+解放の前後で比べると、実際に効いたことが確認できる。
+
+```bash
+make release-check     # = release_all --dry-run
 ```
 
 | 対象 | ポート / ID | やること |

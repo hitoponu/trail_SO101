@@ -107,3 +107,38 @@ def test_id_sets_match_the_hardware():
 def test_report_does_not_raise(capsys, value):
     _outcome({1: value, 2: None}).report()
     assert "ID 1" in capsys.readouterr().out
+
+
+def test_report_says_whether_it_wrote_anything(capsys):
+    """--dry-run と実解放を取り違えないこと。
+
+    実機では「読んだだけ」と「トルクを切った」を混同すると、切れていない
+    アームを切れたと思って手を放すことになる。見出しで区別する。
+    """
+    outcome = _outcome({1: 0})
+    outcome.read_only = True
+    outcome.report()
+    assert "読み出しのみ" in capsys.readouterr().out
+
+    outcome.read_only = False
+    outcome.report()
+    assert "解放" in capsys.readouterr().out
+
+
+def test_dry_run_distinguishes_engaged_from_unreadable():
+    """「トルクが入っている」と「読めなかった」は別物。
+
+    前者は解放すれば直る。後者は配線・電源・ポートの問題で、解放できたのか
+    どうかすら判断できない。まとめて「失敗」にすると原因を取り違える。
+    """
+    engaged = _outcome({1: 1, 2: 0})
+    unreadable = _outcome({1: None, 2: None})
+    released = _outcome({1: 0, 2: 0})
+
+    def classify(outcome):
+        # main() の --dry-run 分岐と同じ判定。
+        return any(v not in (None, 0) for v in outcome.torque.values())
+
+    assert not engaged.released and classify(engaged)
+    assert not unreadable.released and not classify(unreadable)
+    assert released.released

@@ -2,6 +2,7 @@
 
     ros2 run lekiwi_so101_bringup release_all
     ros2 run lekiwi_so101_bringup release_all --yes --only wheels
+    ros2 run lekiwi_so101_bringup release_all --dry-run   # 読むだけ。何も書かない
 
 ────────────────────────────────────────────────────────────────────────
 なぜこれが要るのか
@@ -63,6 +64,8 @@ class Outcome:
         self.ids = ids
         self.error: str | None = None
         self.torque: dict[int, int | None] = {}
+        # --dry-run。読んだだけで何も書いていない。表示の文言だけが変わる。
+        self.read_only = False
 
     @property
     def released(self) -> bool:
@@ -81,7 +84,8 @@ class Outcome:
         return all(value == 0 for value in self.torque.values())
 
     def report(self) -> None:
-        print(f"── {self.label} ({self.port}, ID {self.ids}) " + "─" * 20)
+        mode = "読み出しのみ" if self.read_only else "解放"
+        print(f"── {self.label} ({self.port}, ID {self.ids}, {mode}) " + "─" * 14)
         if self.error is not None:
             print(f"   ★ {self.error}")
         if not self.torque:
@@ -91,9 +95,9 @@ class Outcome:
             if value is None:
                 print(f"   ID {motor_id}: ★ 読み出せない (配線・電源・ID を確認)")
             elif value == 0:
-                print(f"   ID {motor_id}: OK  Torque_Enable=0")
+                print(f"   ID {motor_id}: Torque_Enable=0  (脱力)")
             else:
-                print(f"   ID {motor_id}: ★ Torque_Enable={value} のまま")
+                print(f"   ID {motor_id}: Torque_Enable={value}  (★ トルクが入っている)")
 
 
 def diagnose_port(port: str) -> str | None:
@@ -108,9 +112,16 @@ def diagnose_port(port: str) -> str | None:
     return None
 
 
-def release_bus(label: str, port: str, ids: list[int], *, zero_velocity: bool) -> Outcome:
-    """1 本のバスを解放する。失敗しても例外は投げず Outcome に載せる。"""
+def release_bus(
+    label: str, port: str, ids: list[int], *, zero_velocity: bool, read_only: bool = False
+) -> Outcome:
+    """1 本のバスを解放する。失敗しても例外は投げず Outcome に載せる。
+
+    ``read_only=True`` なら ``Torque_Enable`` を読むだけで**一切書き込まない**。
+    解放する前後で状態を比べるために使う (``--dry-run``)。
+    """
     outcome = Outcome(label, port, ids)
+    outcome.read_only = read_only
 
     reason = diagnose_port(port)
     if reason is not None:
@@ -135,11 +146,12 @@ def release_bus(label: str, port: str, ids: list[int], *, zero_velocity: bool) -
         return outcome
 
     try:
-        if zero_velocity:
-            # ★ ホイールだけ。速度モードなので Goal_Velocity=0 が「止まれ」になる。
-            #   トルクを切る前にゼロを入れておかないと、切った瞬間まで回り続ける。
-            bus.stop()
-        bus.disable_torque()
+        if not read_only:
+            if zero_velocity:
+                # ★ ホイールだけ。速度モードなので Goal_Velocity=0 が「止まれ」になる。
+                #   トルクを切る前にゼロを入れておかないと、切った瞬間まで回り続ける。
+                bus.stop()
+            bus.disable_torque()
         outcome.torque = bus.read_torque_enable()
     except Exception as exc:  # noqa: BLE001
         # 途中で通信が死んでも、読めたぶんの Torque_Enable は報告する。
@@ -181,12 +193,19 @@ def main() -> None:
     parser.add_argument(
         "--yes", action="store_true", help="アームが落ちる確認をスキップする"
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Torque_Enable を読むだけで**一切書き込まない**。"
+        "解放の前後で状態を比べるのに使う (アームは落ちない)",
+    )
     args = parser.parse_args()
 
     do_wheels = args.only in ("both", "wheels")
     do_arm = args.only in ("both", "arm")
 
-    if do_arm and not confirm(args.yes):
+    # ★ --dry-run では確認を求めない。何も書かないのでアームは落ちない。
+    if do_arm and not args.dry_run and not confirm(args.yes):
         sys.exit(1)
 
     outcomes: list[Outcome] = []
@@ -194,11 +213,17 @@ def main() -> None:
     #   間も機体は動き続けるので、ホイールを後回しにしない。
     if do_wheels:
         outcomes.append(
-            release_bus("ホイール", args.wheel_port, WHEEL_IDS, zero_velocity=True)
+            release_bus(
+                "ホイール", args.wheel_port, WHEEL_IDS,
+                zero_velocity=True, read_only=args.dry_run,
+            )
         )
     if do_arm:
         outcomes.append(
-            release_bus("アーム", args.arm_port, ARM_IDS, zero_velocity=False)
+            release_bus(
+                "アーム", args.arm_port, ARM_IDS,
+                zero_velocity=False, read_only=args.dry_run,
+            )
         )
 
     print()
@@ -209,6 +234,24 @@ def main() -> None:
     # ★ 片方のポートが無くてももう片方は処理する。両方が揃わないと失敗、では
     #   「アームだけ繋がった机上の切り分け」ができない。
     failed = [o for o in outcomes if not o.released]
+    if args.dry_run:
+        # ★ 終了コードの意味は通常時と同じ「全 ID の 0 を読めたか」。
+        #   --dry-run では **exit 1 が異常とは限らない**（トルクが入っているのを
+        #   確認しに来た、が普通の使い方）。
+        #   ★「トルクが入っている」と「読めなかった」は別物なので混ぜない。
+        #     前者は解放すれば直り、後者は配線・電源・ポートの問題。
+        engaged = [o for o in failed if any(v not in (None, 0) for v in o.torque.values())]
+        unknown = [o for o in failed if o not in engaged]
+        if engaged:
+            print("トルクが入っています: " + ", ".join(o.label for o in engaged))
+            print("  解放するには --dry-run を外して実行する。")
+        if unknown:
+            print("★ 状態を読めませんでした: " + ", ".join(o.label for o in unknown))
+            print("  ポート・電源・配線を確認すること。解放できたかは判断できない。")
+        if failed:
+            sys.exit(1)
+        print("すべて Torque_Enable=0（脱力済み）。何も書き込んでいません。")
+        return
     if failed:
         print("★ 解放を確認できなかったものがあります: "
               + ", ".join(o.label for o in failed))

@@ -8,7 +8,7 @@ import time
 
 import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
@@ -264,14 +264,22 @@ def main(args=None) -> None:
             executor.remove_node(node)
         if node.faulted:
             exit_code = 1
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         # ★ Ctrl+C は正常終了。ここで捕まえないと KeyboardInterrupt が
         #   そのまま抜けて、停止のたびにトレースバックと
         #   "process has died [exit code -2]" がログに出る。
         #   トルク OFF は下の finally が担うので安全性には影響しないが、
         #   **正常に切れたのか異常終了したのかを操作者が判断できなくなる**のが問題。
         #   base_driver.py と cartesian_jog.py と同じ扱いに揃える。
-        pass
+        #
+        # ★ ExternalShutdownException も一緒に拾う。これは Exception の
+        #   サブクラスなので、下の except Exception に落ちると事実と違う
+        #   "Failed to start" を出して exit 1 になる。このノードは fault 時に
+        #   自分で rclpy.shutdown() を呼ぶ (制御ループの例外処理) ので、
+        #   spin() がこれを投げる経路は実在する。
+        #   ★ 実際に fault していたかは node.faulted で別途判定する。
+        if node is not None and node.faulted:
+            exit_code = 1
     except Exception as exc:  # noqa: BLE001 - process boundary reports startup faults
         print(f"Failed to start SO-101 LeRobot bridge: {exc}", file=sys.stderr)
         exit_code = 1
