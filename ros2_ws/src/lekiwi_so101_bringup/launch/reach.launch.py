@@ -31,13 +31,14 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.actions import GroupAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, LaunchConfiguration
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
+
+from so101_bringup.calibration_limits import build_robot_description
 
 
 def generate_launch_description():
@@ -49,6 +50,7 @@ def generate_launch_description():
     joint_prefix = LaunchConfiguration("joint_prefix")
     usb_port = LaunchConfiguration("usb_port")
     robot_id = LaunchConfiguration("robot_id")
+    calibration_dir = LaunchConfiguration("calibration_dir")
     start_rviz = LaunchConfiguration("start_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
     controllers_file = LaunchConfiguration("controllers_file")
@@ -60,41 +62,45 @@ def generate_launch_description():
     wrist_camera_parent = LaunchConfiguration("wrist_camera_parent")
     mock_wrist_camera_optical = LaunchConfiguration("mock_wrist_camera_optical")
 
-    robot_description = ParameterValue(
-        Command(
-            [
-                "xacro ",
-                str(xacro_file),
-                " use_mesh:=false",
-                " prefix:=",
-                joint_prefix,
-                " usb_port:=",
-                usb_port,
-            ]
-            + [
-                token
-                for key in mount_keys
-                for token in (
-                    f" arm_mount_{key}:=",
-                    LaunchConfiguration(f"arm_mount_{key}"),
-                )
-            ]
-            + [
-                " wrist_camera:=", wrist_camera,
-                " wrist_camera_name:=", wrist_camera_name,
-                " wrist_camera_parent:=", wrist_camera_parent,
-            ]
-            + [
-                token
-                for key in mount_keys
-                for token in (
-                    f" wrist_camera_{key}:=",
-                    LaunchConfiguration(f"wrist_camera_{key}"),
-                )
-            ]
-        ),
-        value_type=str,
-    )
+    def setup_robot_state_publisher(context, *, xacro_file: Path):
+        prefix = joint_prefix.perform(context)
+        mappings = {
+            "use_mesh": "false",
+            "prefix": prefix,
+            "usb_port": usb_port.perform(context),
+        }
+        for key in mount_keys:
+            mappings[f"arm_mount_{key}"] = LaunchConfiguration(
+                f"arm_mount_{key}"
+            ).perform(context)
+        mappings.update(
+            {
+                "wrist_camera": wrist_camera.perform(context),
+                "wrist_camera_name": wrist_camera_name.perform(context),
+                "wrist_camera_parent": wrist_camera_parent.perform(context),
+            }
+        )
+        for key in mount_keys:
+            mappings[f"wrist_camera_{key}"] = LaunchConfiguration(
+                f"wrist_camera_{key}"
+            ).perform(context)
+
+        robot_description = build_robot_description(
+            xacro_file,
+            mappings=mappings,
+            calibration_dir=calibration_dir.perform(context),
+            robot_id=robot_id.perform(context),
+            backend=backend.perform(context),
+        )
+        return [
+            Node(
+                package="robot_state_publisher",
+                executable="robot_state_publisher",
+                name="robot_state_publisher",
+                output="screen",
+                parameters=[{"robot_description": robot_description}],
+            )
+        ]
 
     return LaunchDescription(
         [
@@ -116,6 +122,13 @@ def generate_launch_description():
                 "robot_id",
                 default_value="",
                 description="backend:=lerobot では必須の LeRobot 較正 ID",
+            ),
+            DeclareLaunchArgument(
+                "calibration_dir",
+                default_value=(
+                    "/root/.cache/huggingface/lerobot/calibration/robots/so_follower"
+                ),
+                description="LeRobot calibration JSON directory",
             ),
             DeclareLaunchArgument(
                 "controllers_file",
@@ -163,12 +176,9 @@ def generate_launch_description():
                 for key in mount_keys
             ),
             # ---- システム全体で唯一の robot_state_publisher ----
-            Node(
-                package="robot_state_publisher",
-                executable="robot_state_publisher",
-                name="robot_state_publisher",
-                output="screen",
-                parameters=[{"robot_description": robot_description}],
+            OpaqueFunction(
+                function=setup_robot_state_publisher,
+                kwargs={"xacro_file": xacro_file},
             ),
             # ---- アーム側 ----
             # follower.launch.py の起動順序 (bridge 待ち -> control_node ->
@@ -194,6 +204,7 @@ def generate_launch_description():
                             ("backend", backend),
                             ("usb_port", usb_port),
                             ("robot_id", robot_id),
+                            ("calibration_dir", calibration_dir),
                             ("description_file", str(xacro_file)),
                             ("joint_prefix", joint_prefix),
                             ("controllers_file", controllers_file),

@@ -136,6 +136,13 @@ docker compose exec -it so101-follower /entrypoint.sh \
 | `calibration_dir` | `/root/.cache/huggingface/lerobot/calibration/robots/so_follower` | read-only較正ディレクトリ |
 | `start_rviz` | `true` | RViz 2を起動するか |
 
+実機の`backend:=lerobot`では、launch時に指定した`robot_id`の校正JSONから
+`shoulder_pan`、`shoulder_lift`、`elbow_flex`、`wrist_flex`の機械的な
+`range_min/max`をradへ変換し、同じ`robot_description`の関節limitへ反映します。
+`wrist_roll`は全周回転モータとして扱われるため、較正値からは変換せず、
+この構成の機械安全範囲 `-3.0〜3.0 rad` を使用します。
+校正ファイルが無い場合は実機launchを開始せず、mock backendでは従来のURDF既定値を使います。
+
 較正作業は、ROSを停止した状態でLeRobotのコマンドを使用してください。
 
 ## ROSインターフェース

@@ -21,7 +21,7 @@ import rclpy
 import tf2_ros
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
-from control_msgs.action import FollowJointTrajectory
+from control_msgs.action import FollowJointTrajectory, ParallelGripperCommand
 from geometry_msgs.msg import PointStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
@@ -62,6 +62,7 @@ class ReachToPoint(Node):
             "point_target_topic": "/clicked_point",
             "subscribe_clicked_point": True,
             "trajectory_action": "/joint_trajectory_controller/follow_joint_trajectory",
+            "gripper_action": "/gripper_controller/gripper_cmd",
             "expected_frame": "map",
             "tf_timeout": 0.5,
             "tf_max_age": 1.0,
@@ -94,11 +95,18 @@ class ReachToPoint(Node):
             # cannot sweep into the LiDAR or the camera mount. laser_link and
             # arm_mount_link are only 44 mm apart in xy.
             "joint_limit_overrides": [""],
-            # Folded directly above the arm mount: tip lands at (0.087, -0.040,
-            # 0.112) in base_footprint, 0.096 m from the robot centre, so
-            # inside both the wheel circle (0.125) and robot_radius (0.17).
-            # Provisional until measured on hardware.
-            "stow_positions": [0.0, 0.0, 1.25, 1.31, 0.0],
+            # Measured stow target.  The stow callback still intersects it with
+            # the runtime URDF limits and the configured safety margin.
+            # Order: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex,
+            # wrist_roll.  The gripper target is configured separately below.
+            "stow_positions": [
+                0.03222146311374147,
+                -1.7951958020513104,
+                1.7422605412215924,
+                -1.7721804712557807,
+                1.370946537720381,
+            ],
+            "stow_gripper_position": 0.0363150867823765,
             "solver_tolerance": 0.005,
             "solver_max_iterations": 200,
             "solver_step": 0.02,
@@ -142,6 +150,9 @@ class ReachToPoint(Node):
                 f"stow_positions must have {len(ARM_JOINTS)} entries, "
                 f"got {len(self._stow)}"
             )
+        self._stow_gripper = float(param("stow_gripper_position"))
+        if not math.isfinite(self._stow_gripper):
+            raise ValueError("stow_gripper_position must be finite")
 
         self._config = SolverConfig(
             tolerance=float(param("solver_tolerance")),
@@ -234,6 +245,12 @@ class ReachToPoint(Node):
             self,
             FollowJointTrajectory,
             str(param("trajectory_action")),
+            callback_group=self._actions,
+        )
+        self._gripper_client = ActionClient(
+            self,
+            ParallelGripperCommand,
+            str(param("gripper_action")),
             callback_group=self._actions,
         )
         self.create_service(
@@ -574,6 +591,34 @@ class ReachToPoint(Node):
 
     # ----------------------------------------------------------------- output
 
+    def _send_gripper(self, position: float) -> None:
+        goal = ParallelGripperCommand.Goal()
+        goal.command.position = [float(position)]
+        future = self._gripper_client.send_goal_async(goal)
+        future.add_done_callback(self._gripper_goal_response)
+
+    def _gripper_goal_response(self, future) -> None:
+        try:
+            handle = future.result()
+        except Exception as exc:  # pragma: no cover - middleware failure
+            self.get_logger().error(f"グリッパのstow送信に失敗: {exc}")
+            return
+        if handle is None or not handle.accepted:
+            self.get_logger().error("グリッパのstowゴールが拒否された")
+            return
+        result_future = handle.get_result_async()
+        result_future.add_done_callback(self._gripper_result)
+
+    def _gripper_result(self, future) -> None:
+        try:
+            outcome = future.result()
+        except Exception as exc:  # pragma: no cover - middleware failure
+            self.get_logger().error(f"グリッパのstow結果を取得できない: {exc}")
+            return
+        if outcome is None or outcome.status != GoalStatus.STATUS_SUCCEEDED:
+            status = "unknown" if outcome is None else str(outcome.status)
+            self.get_logger().error(f"グリッパのstowに失敗: status={status}")
+
     def _send(self, positions: np.ndarray, duration: float, target=None) -> None:
         if not self._client.wait_for_server(timeout_sec=2.0):
             self._report("FAILED_ACTION", "コントローラのアクションサーバが無い")
@@ -714,6 +759,14 @@ class ReachToPoint(Node):
             response.success = False
             response.message = "robot_description 未受信で関節制限を確認できない"
             return response
+        if not self._client.wait_for_server(timeout_sec=2.0):
+            response.success = False
+            response.message = "アームのアクションサーバが無い"
+            return response
+        if not self._gripper_client.wait_for_server(timeout_sec=2.0):
+            response.success = False
+            response.message = "グリッパのアクションサーバが無い"
+            return response
         start = np.array([self._positions[name] for name in self._arm_joints])
         positions = np.array(self._stow)
         margin = self._config.joint_limit_margin
@@ -735,6 +788,7 @@ class ReachToPoint(Node):
             self._max_duration, max(self._min_duration, travel / self._max_joint_speed)
         )
         self._report("STOW", f"dur={duration:.1f}")
+        self._send_gripper(self._stow_gripper)
         self._send(positions, duration)
         response.success = True
         response.message = "stowing"

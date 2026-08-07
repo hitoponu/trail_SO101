@@ -67,18 +67,20 @@ so101_reach_to_point:
     #   例: ["arm_shoulder_pan_joint:-1.2:1.2"]
     joint_limit_overrides: [""]
 
-    # ★ 実測待ちの暫定値だが、安全側に倒してある。
-    #   アーム基部 (base_footprint で 0.080,-0.040) のほぼ真上に折り畳む姿勢。
-    #   手先は base_footprint で (0.087,-0.040,0.112)、機体中心から水平 0.096m で
-    #   車輪円 (半径0.125) と nav2 の robot_radius 0.17 の内側に収まる。
-    #   shoulder_pan=0 なので LiDAR / カメラマウント側へ振らない。
+    # ★ stow姿勢（JointStateの実測値）。
+    #   順序は shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll。
+    #   gripper は別アクションで stow_gripper_position へ送る。
     #
-    #   ★ 以前の [0.0,-1.4,1.4,0.6,0.0] は「畳んだつもり」で実際は
-    #     水平 0.307m・高さ 0.161m に伸びており、robot_radius も車輪円も
-    #     大きく外れていた (FK で確認)。トルクが切れると前方へ倒れる。
-    #
-    #   ★ 初回は必ず無通電で手を添え、干渉しないことを確かめてから使うこと。
-    stow_positions: [0.0, 0.0, 1.25, 1.31, 0.0]
+    #   arm_elbow_flex_joint:     1.7422605412215924
+    #   arm_gripper_joint:        0.0363150867823765
+    #   arm_shoulder_lift_joint: -1.7951958020513104
+    #   arm_shoulder_pan_joint:   0.03222146311374147
+    #   arm_wrist_flex_joint:    -1.7721804712557807
+    #   arm_wrist_roll_joint:     1.370946537720381
+    stow_positions:
+      [0.03222146311374147, -1.7951958020513104, 1.7422605412215924,
+       -1.7721804712557807, 1.370946537720381]
+    stow_gripper_position: 0.0363150867823765
 
     solver_tolerance: 0.005
     solver_max_iterations: 200
