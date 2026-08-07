@@ -80,6 +80,7 @@ lerobot-calibrate --robot.type=so101_follower \
 | LeKiwi ベース | `docker/lekiwi_base_ros2/README.md` |
 | LeKiwi + Nav2/SLAM | `docker/lekiwi_bringup/README.md` |
 | LeKiwi + SO-101（リーチ） | `docker/lekiwi_so101_bringup/README.md` |
+| **TF の信頼性一覧**（どこを疑うかの索引） | `docs/tf_reliability.md` |
 | RPLIDAR / RealSense | `docker/rplidar_ros2/`, `docker/realsense_ros2/` |
 | 実機担当 agent への指示 | `docs/hardware_agent.md`, `docs/agent/` |
 

@@ -1,91 +1,34 @@
 # LeKiwi + SO-101 — `map` 上の点へのリーチ
 
-LeKiwi 移動ベースに SO-101 アームを載せ、**`map` 座標系に固定された点へ手先を伸ばす**構成。
+## できること
 
-## できること・できないこと
+- LIDAR、wristのrealsenseカメラからの点群取得
+- LIDARによるSLAM&Navigation
+- `map`座標系上の点へのアームのリーチ
 
-- **アームのリーチだけ。** 目標が届かなければ**警告して何もしない**。
-  ベースは動かさない（ノードは `/cmd_vel` の publisher を一切作らない）
-- 精度は**数 cm**。ソルバの許容差 5mm とは別物（後述）
-
-## 構成
-
-```
-        map (slam_toolbox)
-         └ odom (base_driver のオドメトリ積分)
-            └ base_footprint → base_link
-                               ├ laser_link      ← RPLIDAR
-                               └ arm_mount_link
-                                  └ arm_base_link … arm_gripper_link
-                                       ├ arm_gripper_frame_link  ← リーチの手先
-                                       └ wrist_camera_mount_link
-                                          └ wrist_camera_link  ← 手首カメラ
-```
-
-| コンテナ | イメージ | 役割 |
-| --- | --- | --- |
-| `lekiwi-nav` | `lekiwi-base-ros2` | base_driver, scan_filter, slam_toolbox, Nav2 |
-| `rplidar-a1` | `rplidar-a1-ros2` | sllidar_node → `/scan` |
-| `lekiwi-so101-arm` | `so101-ros2` | **robot_state_publisher（結合、唯一）**, LeRobot ブリッジ, ros2_control, リーチノード, **RViz（唯一）** |
-| `lekiwi-wrist-camera` | `realsense-d435i-ros2` | 手首カメラ。点群 → `wrist_camera_depth_optical_frame` |
-
-### なぜコンテナを分けるのか
-
-2 つのサブシステムで**安全論理が逆**だから。
-
-| | 正常停止 (SIGINT) | SIGKILL |
-| --- | --- | --- |
-| アーム | トルク OFF → **落ちる** | 保持 → 凍る |
-| ベース | 停止 → 安全 | **最後の指令速度で回り続ける** |
-
-`stop_signal` / `stop_grace_period` はサービス単位にしか設定できない。
-
-### なぜ RSP がアームのコンテナにあるのか
-
-結合 URDF は `lekiwi_description` と `so_arm101_description` の**両方**を必要とし、
-両方を `$(find)` できるのはこのイメージだけ（xacro の `$(find)` はローカルの
-ファイルシステムを見るので DDS では橋渡しできない）。
-
-`/robot_description` は TRANSIENT_LOCAL / depth 1 なので、publisher が 2 つあると
-後から繋いだ購読者がどちらの latch を掴むか非決定になる。だから
-ベース側は `start_robot_state_publisher:=false` で起動する。
-
-## 使い方
+## 環境構築
 
 ```bash
 cp .env.example .env      # ★ 先に実機に合わせて編集する
 make build
-make bootstrap            # ★ 初回とパッケージ追加時。飛ばすと起動できない
+make bootstrap            # ★ 初回とパッケージ追加時。colcon build --symlink-installしている
+```
 
+## 動かし方
+
+```bash
 make mock                 # 実機に触れない（Mac 可）
 make reach                # 実機
 ```
 
-> ★ **`make bootstrap` を飛ばさないこと。** このイメージはワークスペースを
-> 焼き込まず、ホストからマウントします。`ros2_ws/install` と
-> `ros2_ws/src/ros2_so_arm` は `.gitignore` 済みで `git pull` では降ってきません。
-> 飛ばすと `Package 'lekiwi_so101_bringup' not found` になります。
-> `bootstrap.sh` は上流の取得と `colcon build` に加え、結合 URDF の静的検査
-> （単一ツリー / リンク名の重複 / controllers の関節名）も走らせます。
+rvizで点群の確認、navigationができる。
 
-別ターミナルから目標を与える。
+publish pointによりアームのリーチができる。
 
+ros2コマンドを使う場合は
 ```bash
-docker exec lekiwi-so101-arm /entrypoint.sh \
-  ros2 topic pub --once /so101/reach_target geometry_msgs/msg/PoseStamped \
-    '{header: {frame_id: map}, pose: {position: {x: 0.35, y: 0.05, z: 0.25}, orientation: {w: 1.0}}}'
-
-docker exec lekiwi-so101-arm /entrypoint.sh ros2 topic echo /so101/reach_status
+docker exec -it lekiwi-so101-arm bash
 ```
-
-RViz の **"Publish Point"** ツールでも指定できる。
-
-> ★ RViz の **Fixed Frame を `map`** にすること。Publish Point は Fixed Frame の
-> 座標で publish するので、`odom` のままだと `REJECTED_WRONG_FRAME` になる。
->
-> ★ Publish Point が出すのは `PointStamped` であって `PoseStamped` ではない
-> （`PoseStamped` を出すのは "2D Goal Pose" で、そちらは Nav2 が使っている）。
-> ノードは両方の型を購読しているので、remap は不要。
 
 ## 停止手順
 
@@ -95,30 +38,6 @@ RViz の **"Publish Point"** ツールでも指定できる。
 make stow     # 1. アームを低く畳む
 make down     # 2. bridgeをshutdownしてトルクOFF後、コンテナを停止
 ```
-
-## インターフェース一覧
-
-すべて**モックで実在を確認した**もの（`ros2 topic type` / `action list -t` / `service list -t`）。
-コンテナ内で叩くので、以下は共通の前置きを使う。
-
-```bash
-E="docker exec lekiwi-so101-arm /entrypoint.sh"       # アーム側（実機）
-N="docker exec lekiwi-nav /entrypoint.sh"             # ベース側（実機）
-
-E="docker exec lekiwi-so101-arm-mock /entrypoint.sh"  # アーム側（モック）
-N="docker exec lekiwi-nav-mock /entrypoint.sh"        # ベース側（モック）
-```
-
-> ★ **`/entrypoint.sh` の前置は必須。** `docker exec` は ENTRYPOINT を通らないので、
-> 付けないと `ros2: executable file not found in $PATH` になる。
->
-> ★ **`nav2_msgs` はベースコンテナにしか入っていない。**
-> Nav2 の**アクション**（`/navigate_to_pose` など）は `$N` で叩くこと。
-> `$E` で叩くと `The passed action type is invalid` になる（型を解決できないため）。
-> トピック（`/goal_pose` は `geometry_msgs`）はどちらからでも叩ける。
->
-> ★ **起動直後は DDS の discovery が終わっておらず、`ros2 topic list` や
-> `action list` に一部しか出ない。** 30 秒ほど待つか `make check` を使うこと。
 
 ### トピック
 
@@ -415,3 +334,50 @@ $E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped 
   約 0.75kg がオムニ車輪の上で振れると実際の姿勢はずれるが、
   オドメトリにも slam にも見えない
 - **`nav2.yaml` の `robot_radius: 0.17` は収納状態の前提。** 走行前に stow すること
+
+
+## 構成
+
+```
+        map (slam_toolbox)
+         └ odom (base_driver のオドメトリ積分)
+            └ base_footprint → base_link
+                               ├ laser_link      ← RPLIDAR
+                               └ arm_mount_link
+                                  └ arm_base_link … arm_gripper_link
+                                       ├ arm_gripper_frame_link  ← リーチの手先
+                                       └ wrist_camera_mount_link
+                                          └ wrist_camera_link  ← 手首カメラ
+```
+
+| コンテナ | イメージ | 役割 |
+| --- | --- | --- |
+| `lekiwi-nav` | `lekiwi-base-ros2` | base_driver, scan_filter, slam_toolbox, Nav2 |
+| `rplidar-a1` | `rplidar-a1-ros2` | sllidar_node → `/scan` |
+| `lekiwi-so101-arm` | `so101-ros2` | **robot_state_publisher（結合、唯一）**, LeRobot ブリッジ, ros2_control, リーチノード, **RViz（唯一）** |
+| `lekiwi-wrist-camera` | `realsense-d435i-ros2` | 手首カメラ。点群 → `wrist_camera_depth_optical_frame` |
+
+
+## インターフェース一覧
+
+すべて**モックで実在を確認した**もの（`ros2 topic type` / `action list -t` / `service list -t`）。
+コンテナ内で叩くので、以下は共通の前置きを使う。
+
+```bash
+E="docker exec lekiwi-so101-arm /entrypoint.sh"       # アーム側（実機）
+N="docker exec lekiwi-nav /entrypoint.sh"             # ベース側（実機）
+
+E="docker exec lekiwi-so101-arm-mock /entrypoint.sh"  # アーム側（モック）
+N="docker exec lekiwi-nav-mock /entrypoint.sh"        # ベース側（モック）
+```
+
+> ★ **`/entrypoint.sh` の前置は必須。** `docker exec` は ENTRYPOINT を通らないので、
+> 付けないと `ros2: executable file not found in $PATH` になる。
+>
+> ★ **`nav2_msgs` はベースコンテナにしか入っていない。**
+> Nav2 の**アクション**（`/navigate_to_pose` など）は `$N` で叩くこと。
+> `$E` で叩くと `The passed action type is invalid` になる（型を解決できないため）。
+> トピック（`/goal_pose` は `geometry_msgs`）はどちらからでも叩ける。
+>
+> ★ **起動直後は DDS の discovery が終わっておらず、`ros2 topic list` や
+> `action list` に一部しか出ない。** 30 秒ほど待つか `make check` を使うこと。
