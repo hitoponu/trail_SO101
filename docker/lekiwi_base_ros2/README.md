@@ -1,7 +1,8 @@
 # LeKiwi ベース + ROS 2 Jazzy + Docker
 
-> **LeKiwi ベース + RPLiDAR を同時に起動する場合は [`../lekiwi_bringup/`](../lekiwi_bringup/) を使ってください。**
+> **★ 通常の運用は [`../robot/`](../robot/) を使ってください（1 イメージ 1 コンテナの統合スタック）。**
 > このディレクトリはベース単体の動作確認・デバッグ用です。
+> 統合スタックと同時に起動しないこと（`ROS_DOMAIN_ID` が衝突して `/tf` が混信します）。
 
 LeKiwi の3輪オムニ移動ベース（Feetech STS3215 × 3、モータ ID 7/8/9）を
 ROS 2 の `/cmd_vel` で駆動する構成です。オドメトリと TF を出すので、

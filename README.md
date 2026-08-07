@@ -57,11 +57,15 @@ ROS 2 Jazzy の構成は `docker/` 以下にまとめてある。ROS 2 パッケ
 `ros2_ws/src/` にある。実機を繋ぐものはいずれも **Linux ホスト**が前提
 （macOS の Docker はシリアル/USB デバイスをコンテナへ渡せないため）。
 
+**ふだん使うのは統合スタック（`docker/robot`）1 つだけ。** 残りは 1 サブシステムを
+切り分けてデバッグするときのために残してある（同時に起動しないこと）。
+
 | 対象 | 内容 | ドキュメント |
 | --- | --- | --- |
+| **ロボット全体（統合）** | **LiDAR / SLAM / Nav2 / アーム / リーチ / 手首カメラを 1 イメージ 1 コンテナ 1 launch で動かす** | **[docker/robot/README.md](docker/robot/README.md)** |
 | SO-101 フォロワアーム | LeRobotバックエンドと薄いROSブリッジで`FollowJointTrajectory`とグリッパを提供 | [docker/so101_ros2/README.md](docker/so101_ros2/README.md) |
 | LeKiwi ベース | 3輪オムニベースを `/cmd_vel` で駆動し、オドメトリと TF を出す | [docker/lekiwi_base_ros2/README.md](docker/lekiwi_base_ros2/README.md) |
-| LeKiwi + SO-101（リーチ） | ベースにアームを載せ、`map` 上の点へ手先を伸ばす | [docker/lekiwi_so101_bringup/README.md](docker/lekiwi_so101_bringup/README.md) |
+| LeKiwi + SO-101（リーチ、4 コンテナ） | ベースにアームを載せ、`map` 上の点へ手先を伸ばす。**インターフェース一覧と CLI テストはここ** | [docker/lekiwi_so101_bringup/README.md](docker/lekiwi_so101_bringup/README.md) |
 | 手首カメラ（RealSense） | アームの手首に載せ、点群を `map` 上に置く | [docker/lekiwi_so101_bringup/README.md](docker/lekiwi_so101_bringup/README.md) |
 | RPLIDAR A1M8 | 2DスキャンをPointCloud2へ変換してRViz 2で表示 | [docker/rplidar_ros2/README.md](docker/rplidar_ros2/README.md) |
 | RealSense D435i | D435i を起動してRViz 2で表示 | [docker/realsense_ros2/README.md](docker/realsense_ros2/README.md) |
@@ -73,3 +77,9 @@ ROS 2 Jazzy の構成は `docker/` 以下にまとめてある。ROS 2 パッケ
 > **SO-101 アームの安全上の注意**: ブリッジの正常終了で
 > **トルクが切れてアームが落ちる**。停止前に必ず低く畳んだ姿勢へ動かすこと。
 > 詳細は上記 README の冒頭を参照。
+
+> **★ 非常停止は物理スイッチだけ**: `docker kill` を非常停止に使わないこと。
+> SIGKILL では停止処理（Python の `finally`）が走らず、アームはトルクが入ったまま
+> 凍り、**ホイールは最後の指令速度で回り続ける**（STS3215 にコマンドウォッチドッグは
+> 無い）。異常終了からの復帰は
+> `ros2 run lekiwi_so101_bringup release_all`（`docker/robot` の `make release`）。
