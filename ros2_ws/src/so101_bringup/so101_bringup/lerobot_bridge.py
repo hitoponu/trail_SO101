@@ -264,6 +264,14 @@ def main(args=None) -> None:
             executor.remove_node(node)
         if node.faulted:
             exit_code = 1
+    except KeyboardInterrupt:
+        # ★ Ctrl+C は正常終了。ここで捕まえないと KeyboardInterrupt が
+        #   そのまま抜けて、停止のたびにトレースバックと
+        #   "process has died [exit code -2]" がログに出る。
+        #   トルク OFF は下の finally が担うので安全性には影響しないが、
+        #   **正常に切れたのか異常終了したのかを操作者が判断できなくなる**のが問題。
+        #   base_driver.py と cartesian_jog.py と同じ扱いに揃える。
+        pass
     except Exception as exc:  # noqa: BLE001 - process boundary reports startup faults
         print(f"Failed to start SO-101 LeRobot bridge: {exc}", file=sys.stderr)
         exit_code = 1
