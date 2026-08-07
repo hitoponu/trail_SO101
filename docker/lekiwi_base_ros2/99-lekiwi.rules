@@ -15,13 +15,12 @@
 #   (sts_bus.py のリトライが症状を隠してしまう)。
 #   RPLIDAR の CP210x では起きにくいが CDC-ACM では頻発するため必須。
 
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", \
+# LeKiwi実機で確認したUSBシリアルで識別する。
+# SO-101側も同じVID:PID (1a86:55d3) のため、VID:PIDだけでは識別しない。
+SUBSYSTEM=="tty", ATTRS{serial}=="5A7A017874", \
   MODE:="0660", GROUP:="dialout", SYMLINK+="lekiwi", \
   ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
 
 # 同一の基板を複数繋ぐ場合は VID:PID ではなくシリアルで識別する。
-# macOS でのノード名 /dev/tty.usbmodem5A7A0178741 から、この基板のシリアルは
-# "5A7A0178741" と推測できる。Linux でも同じ文字列が見えるはず。
-#SUBSYSTEM=="tty", ATTRS{serial}=="5A7A0178741", \
-#  MODE:="0660", GROUP:="dialout", SYMLINK+="lekiwi", \
-#  ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+# Linux実機で確認したシリアルは "5A7A017874"。
+# 実機シリアルを変更した場合は、この値も更新すること。

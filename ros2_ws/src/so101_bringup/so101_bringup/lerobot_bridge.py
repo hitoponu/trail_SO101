@@ -63,6 +63,7 @@ class SO101LeRobotBridge(Node):
         self._last_cycle_duration = 0.0
         self._fault: Exception | None = None
         self._closed = False
+        self._shutdown_requested = False
 
         backend_name = str(self.get_parameter("backend").value)
         if backend_name == "mock":
@@ -107,6 +108,12 @@ class SO101LeRobotBridge(Node):
             self._ready,
             callback_group=self._command_group,
         )
+        self.create_service(
+            Trigger,
+            "/so101/lerobot_bridge/shutdown",
+            self._shutdown,
+            callback_group=self._command_group,
+        )
         self.create_timer(
             1.0 / update_rate, self._control_cycle, callback_group=self._io_group
         )
@@ -121,6 +128,32 @@ class SO101LeRobotBridge(Node):
         response.success = not self.faulted
         response.message = "ready" if response.success else str(self._fault)
         return response
+
+    def _shutdown(self, _request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+        """Close LeRobot after the Trigger response has been sent.
+
+        ``docker compose down`` only signals the container's PID 1; the
+        launch process started by ``docker compose exec`` is a separate
+        process.  Exposing shutdown as a ROS service lets the Makefile request
+        the same backend disconnect path as Ctrl+C, including torque-off.
+        The short timer gives the service server time to return its response
+        before the context is shut down.
+        """
+        response.success = True
+        response.message = "shutting down"
+        if not self._shutdown_requested:
+            self._shutdown_requested = True
+            self.create_timer(
+                0.1,
+                self._shutdown_after_response,
+                callback_group=self._command_group,
+            )
+        return response
+
+    def _shutdown_after_response(self) -> None:
+        self.close()
+        if rclpy.ok():
+            rclpy.shutdown()
 
     def _strip_prefix(self, names) -> list[str]:
         """Drop the configured prefix; leave unprefixed names for the validator.
@@ -144,7 +177,18 @@ class SO101LeRobotBridge(Node):
             )
             command = ros_to_lerobot(ordered, self._gripper_limit)
         except InvalidJointCommand as exc:
-            self.get_logger().error(f"Rejected hardware command: {exc}")
+            # ros2_control initializes command interfaces to NaN until the
+            # controllers have received the first finite hardware state.  It
+            # is safe to discard that startup sample (nothing is sent to the
+            # servos), but logging it at ERROR for every 50 Hz sample obscures
+            # the real startup result. Other malformed commands remain errors.
+            if str(exc) == "joint positions must all be finite":
+                self.get_logger().warning(
+                    "Ignoring non-finite startup hardware command",
+                    throttle_duration_sec=1.0,
+                )
+            else:
+                self.get_logger().error(f"Rejected hardware command: {exc}")
             return
         with self._command_lock:
             self._command = command
@@ -185,6 +229,12 @@ class SO101LeRobotBridge(Node):
                     throttle_duration_sec=1.0,
                 )
         except Exception as exc:  # noqa: BLE001 - any I/O error must safe-stop
+            # Ctrl+C shuts down the launch process and its worker threads at
+            # nearly the same time. If the main thread has already closed the
+            # backend, do not turn that normal teardown race into a hardware
+            # fault or a misleading FATAL log.
+            if self._closed or not rclpy.ok():
+                return
             self._fault = exc
             self.get_logger().fatal(f"SO-101 bridge fault: {exc}")
             self.close()

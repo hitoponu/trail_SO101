@@ -31,6 +31,7 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import GroupAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
@@ -128,26 +129,33 @@ def generate_launch_description():
             # ---- アーム側 ----
             # follower.launch.py の起動順序 (bridge 待ち -> control_node ->
             # 直列 spawner -> bridge 終了で shutdown) をそのまま再利用する。
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    str(arm_launch_dir / "follower.launch.py")
-                ),
-                launch_arguments=[
-                    ("start_robot_state_publisher", "false"),
-                    ("start_rviz", "false"),
-                    # ★ ブリッジが落ちてもこの launch service は止めない。
-                    #   止めると同居している唯一の robot_state_publisher も死に、
-                    #   別コンテナの slam_toolbox / Nav2 が
-                    #   base_footprint -> laser_link を失って測位できなくなる。
-                    #   アームの故障をアームだけに閉じ込める。
-                    ("shutdown_on_bridge_exit", "false"),
-                    ("backend", backend),
-                    ("usb_port", usb_port),
-                    ("robot_id", robot_id),
-                    ("description_file", str(xacro_file)),
-                    ("joint_prefix", joint_prefix),
-                    ("controllers_file", controllers_file),
-                ],
+            # follower.launch.py also declares `start_rviz`. Keep its
+            # start_rviz:=false local to the include; otherwise it overwrites
+            # the composed launch's RViz setting in the shared launch context.
+            GroupAction(
+                actions=[
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            str(arm_launch_dir / "follower.launch.py")
+                        ),
+                        launch_arguments=[
+                            ("start_robot_state_publisher", "false"),
+                            ("start_rviz", "false"),
+                            # ★ ブリッジが落ちてもこの launch service は止めない。
+                            #   止めると同居している唯一の robot_state_publisher も死に、
+                            #   別コンテナの slam_toolbox / Nav2 が
+                            #   base_footprint -> laser_link を失って測位できなくなる。
+                            #   アームの故障をアームだけに閉じ込める。
+                            ("shutdown_on_bridge_exit", "false"),
+                            ("backend", backend),
+                            ("usb_port", usb_port),
+                            ("robot_id", robot_id),
+                            ("description_file", str(xacro_file)),
+                            ("joint_prefix", joint_prefix),
+                            ("controllers_file", controllers_file),
+                        ],
+                    )
+                ]
             ),
             # ---- リーチ ----
             Node(

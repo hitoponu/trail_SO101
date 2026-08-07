@@ -90,8 +90,8 @@ docker ps --format '{{.Names}}'    # 実際に動いている名前を先に確�
 
 **「止める」＝「落ちる」です。** 停止前に低く畳んだ姿勢へ動かしてください。
 
-> ★ `docker compose down` は `exec` したプロセスに SIGINT を届けません。
-> トルクは入ったまま残ります。落としたいなら launch 側で `Ctrl+C` すること。
+> ★ `make down` は bridge の shutdown service を先に呼び、トルクOFFを待ってから
+> コンテナを停止します。直接 `docker compose down` する場合はこの保証がありません。
 
 ---
 

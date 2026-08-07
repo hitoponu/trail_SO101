@@ -63,6 +63,8 @@ services:
     ipc: host
     environment:
       DISPLAY: ${DISPLAY}
+      # Xwayland/X11の認証ファイルを固定パスへマウントする。
+      XAUTHORITY: /tmp/.Xauthority
       LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
       XDG_RUNTIME_DIR: /tmp/runtime-root
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
@@ -70,6 +72,7 @@ services:
       ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro
       # ★ ROS ワークスペースは常にホストからマウントする。
       # イメージにパッケージを焼き込まないので、lekiwi_description も
       # so_arm101_description もここから解決される。

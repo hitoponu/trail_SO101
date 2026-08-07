@@ -64,9 +64,9 @@
     <!-- CAD 座標系 → base_link の回転。メッシュを使う場合に必要 -->
     <xacro:property name="cad_yaw" value="${-pi/2}"/>
 
-    <!-- ★ TBD: 実測待ち。RViz でマゼンタ表示されるので未確定と分かる ★ -->
-    <xacro:property name="laser_xyz_TBD" value="0.10 0 0.03"/>
-    <xacro:property name="laser_rpy_TBD" value="0 0 0"/>
+    <!-- LiDAR回転中心: x=100 mm, y=0 mm, z=30 mm。yaw=-7 deg指定 -->
+    <xacro:property name="laser_xyz" value="0.10 0 0.03"/>
+    <xacro:property name="laser_rpy" value="0 0 -0.1221730476"/>
     <!-- カメラマウントは CAD 由来 (CAD (0.02, 0.1, 0) → base_link (0.1, -0.02, 0))。
          光学フレームのオフセットは未実測。 -->
     <xacro:property name="camera_xyz_TBD" value="0.1 -0.02 0.05"/>
@@ -217,7 +217,7 @@
     <!-- ================= センサ取付フレーム (未実測) ================= -->
 
     <!--
-      ★ laser_link の位置は未実測。RPLIDAR A1 を載せたら実測して差し替えること。
+      ★ laser_link の位置はRPLIDAR A1実機で実測済み。
 
         フレーム名の整合は rplidar_bringup 側で取ってある。sllidar_ros2 の
         既定の frame_id は "laser" だが、a1_points.launch.py が
@@ -227,7 +227,7 @@
          costmap が一切埋まらない)
     -->
     <joint name="${prefix}laser_joint" type="fixed">
-      <origin xyz="${laser_xyz_TBD}" rpy="${laser_rpy_TBD}"/>
+      <origin xyz="${laser_xyz}" rpy="${laser_rpy}"/>
       <parent link="${prefix}base_link"/>
       <child link="${prefix}laser_link"/>
     </joint>
@@ -264,17 +264,16 @@
     </link>
 
     <!--
-      アーム取付位置。CAD (0.04, 0.08, 0.057) → base_link (0.08, -0.04, 0.057)。
+      アーム取付位置。実測値 base_link (0.08, 0.00, 0.057)。
       SO-101 を載せる構成は lekiwi_so101_bringup を参照 (このマクロ単体では何も生えない)。
 
-      ★ この値は CAD 由来で実測していない。特にブラケットの向き (yaw) は未確認。
-        laser_xyz_TBD と同じく実測待ちなので、確定するまで数 cm の誤差を前提にすること。
+      ★ x/y/z とブラケットの向き (yaw) は実機で実測した値。
 
       ★ 電源系の注意: アームは 7.4V、ホイールは 12V。同一バスへ繋いではいけない。
         アームを載せても給電とシリアルバスは別系統のまま保つこと。
     -->
     <joint name="${prefix}arm_mount_joint" type="fixed">
-      <origin xyz="0.08 -0.04 0.057" rpy="0 0 0"/>
+      <origin xyz="0.08 0.00 0.057" rpy="0 0 0"/>
       <parent link="${prefix}base_link"/>
       <child link="${prefix}arm_mount_link"/>
     </joint>

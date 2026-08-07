@@ -112,6 +112,8 @@ services:
     ipc: host
     environment:
       DISPLAY: ${DISPLAY}
+      # Xwayland/X11の認証ファイルを固定パスへマウントする。
+      XAUTHORITY: /tmp/.Xauthority
       QT_X11_NO_MITSHM: "1"
       QT_QPA_PLATFORM: xcb
       LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
@@ -125,6 +127,7 @@ services:
       - ${DIALOUT_GID:-20}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro
       # ★ ROS ワークスペースは常にホストからマウントする。
       # イメージにパッケージを焼き込まないので、lekiwi_description も
       # so_arm101_description もここから解決される。
@@ -134,13 +137,14 @@ services:
       # LeRobot の較正値。実体はサーボの EEPROM で、この JSON はその控え。
       # 較正を実行した PC のホームにしか無い。
       - ${HOME}/.cache/huggingface/lerobot/calibration/robots/so_follower:/root/.cache/huggingface/lerobot/calibration/robots/so_follower:ro
-    # ★ 待機するだけ。reach.launch.py は明示的に起動する:
+    # ★ 待機するだけ。make reach が起動後に reach.launch.py を exec する。
+    #   手動で起動する場合:
     #   docker compose exec -it lekiwi-so101-arm /entrypoint.sh \
     #     ros2 launch lekiwi_so101_bringup reach.launch.py \
     #       backend:=lerobot robot_id:=my_follower
     #
-    #   ★ docker compose down は exec したプロセスに SIGINT を届けないので
-    #     トルクは入ったまま残る。落としたいなら launch 側で Ctrl+C すること。
+    #   ★ make down は bridge の shutdown service を先に呼び、トルクOFFを待ってから
+    #     Composeを停止する。直接 docker compose down する場合はこの保証がない。
     command: ["sleep", "infinity"]
     restart: "no"
     stop_signal: SIGINT

@@ -34,10 +34,10 @@
   <xacro:arg name="ros2_control_file"
              default="$(find so101_bringup)/control/so101_follower.ros2_control.xacro"/>
 
-  <!-- ★ TBD: 実測待ち。arm_mount_link から見たアーム基部の姿勢。
-       arm_mount_link 自体 (base_link から 0.08, -0.04, 0.057) も CAD 由来で未実測。
-       特に yaw はブラケットの向き次第で 90 度単位で変わりうる。
-       docs/agent/request.md の手順 0 と 3 で確定させること。
+  <!-- ★ arm_mount_link の位置は実測済み: base_link から (0.08, 0.00, 0.057)。
+       以下は arm_mount_link から見たアーム基部の姿勢。
+       取付姿勢 (roll/pitch/yaw) は実測値を使用する。
+       docs/agent/request.md の手順 3 でTFを照合すること。
        xacro のマクロ引数はベクトルを展開できないのでスカラ 6 個で渡す。 -->
   <xacro:arg name="arm_mount_x" default="0.0"/>
   <xacro:arg name="arm_mount_y" default="0.0"/>

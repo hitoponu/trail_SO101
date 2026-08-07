@@ -89,7 +89,7 @@ RViz の **"Publish Point"** ツールでも指定できる。
 
 ```bash
 make stow     # 1. アームを低く畳む
-make down     # 2. コンテナを停止
+make down     # 2. bridgeをshutdownしてトルクOFF後、コンテナを停止
 ```
 
 ## 状態メッセージ
