@@ -1,0 +1,60 @@
+# LeKiwi + SO-101 結合構成のコントローラ設定。
+# so101_bringup/config/ros2_controllers.yaml の arm_ 接頭辞版。
+# YAML は launch から展開できないので、接頭辞ごとに別ファイルにするしかない。
+#
+# ★ 接頭辞は結合 URDF の prefix 引数および launch の joint_prefix と必ず一致させること。
+#   ずれるとコントローラが「そんな関節は無い」で configure に失敗する。
+
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz
+
+    enforce_command_limits: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    gripper_controller:
+      type: parallel_gripper_action_controller/GripperActionController
+
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - arm_shoulder_pan_joint
+      - arm_shoulder_lift_joint
+      - arm_elbow_flex_joint
+      - arm_wrist_flex_joint
+      - arm_wrist_roll_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    constraints:
+      # ★ stopped_velocity_tolerance は 0.0 (= 無効) にしてある。
+      #   ブリッジの速度推定は 50Hz の位置差分で、STS3215 の分解能は
+      #   4096 count/rev ≈ 0.0015 rad。1 量子ぶんの揺れがそのまま
+      #   0.0015 * 50 = 0.077 rad/s に化けるので、完全に静止していても
+      #   0.01 の許容値は必ず超える。単体アーム側の設定は 0.01 のままだが、
+      #   あちらは軌道トピックで投げるだけでアクションの結果を見ていない。
+      #   リーチはアクションの結果で成否を判断するので、ここで無効化しないと
+      #   正しいリーチが毎回 GOAL_TOLERANCE_VIOLATED になる。
+      #   ※ 実機未検証。手順 5 の報告で誤検知の有無を確認すること。
+      stopped_velocity_tolerance: 0.0
+      goal_time: 3.0
+      arm_shoulder_pan_joint: {goal: 0.05}
+      arm_shoulder_lift_joint: {goal: 0.05}
+      arm_elbow_flex_joint: {goal: 0.05}
+      arm_wrist_flex_joint: {goal: 0.05}
+      arm_wrist_roll_joint: {goal: 0.05}
+
+gripper_controller:
+  ros__parameters:
+    joint: arm_gripper_joint
+    allow_stalling: true
+    goal_tolerance: 0.03
+    stall_velocity_threshold: 0.01
+    stall_timeout: 1.0

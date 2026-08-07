@@ -4,11 +4,11 @@
 # ポートの調べ方:  python -m lerobot.scripts.lerobot_find_port
 
 [leader]
-port = "/dev/tty.usbmodem5A7A0176981"
+port = "/dev/tty.usbmodem5A7A0178741"
 id = "my_leader_arm"
 
 [follower]
-port = "/dev/tty.usbmodem58CD1766691"
+port = "/dev/tty.usbmodem5A7A0180801"
 id = "my_follower_arm"
 
 # follower を記録ポーズへ動かすときの補間設定（急な動作を避けるため）

@@ -1,0 +1,40 @@
+services:
+  so101-follower:
+    build:
+      context: ../..
+      dockerfile: docker/so101_ros2/Dockerfile
+    image: local/so101-ros2:jazzy
+    container_name: so101-follower
+    init: true
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    devices:
+      # /dev/null keeps mock startup possible without physical hardware.
+      - ${SO101_DEVICE:-/dev/null}:${SO101_DEVICE:-/dev/null}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # ROSワークスペースは常にホストからマウントする。
+      - ../../ros2_ws:/ros2_ws
+      - ./bootstrap.sh:/bootstrap.sh:ro
+      # LeRobot JSON is the only machine-specific calibration source.
+      - ${HOME}/.cache/huggingface/lerobot/calibration/robots/so_follower:/root/.cache/huggingface/lerobot/calibration/robots/so_follower:ro
+    # Merely starting the container never touches the arm. Launch explicitly:
+    #   docker compose exec -it so101-follower /entrypoint.sh \
+    #     ros2 launch so101_bringup follower.launch.py \
+    #       backend:=lerobot usb_port:=/dev/so101_follower \
+    #       robot_id:=my_follower
+    command: ["sleep", "infinity"]
+    restart: "no"
+    stop_signal: SIGINT
+    stop_grace_period: 20s
+    stdin_open: true
+    tty: true

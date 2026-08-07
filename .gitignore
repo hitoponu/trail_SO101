@@ -16,3 +16,17 @@ wheels/
 # images
 captured_images/
 outputs/
+# vcs import で Docker ビルド中に展開する上流リポジトリ (ros2_ws/so101_upstream.repos)。
+# メッシュが SO101/assets と完全に同一なので追跡しない。
+ros2_ws/src/ros2_so_arm/
+
+# SLAM で保存した地図 (docker/lekiwi_bringup の MAP_DIR 既定値)
+maps/
+
+# colcon
+ros2_ws/install/
+ros2_ws/log/
+
+# 参照用にクローンした LeKiwi 公式リポジトリ (独立した git リポジトリ、約289MB)。
+# ros2_ws のパッケージはこれに依存しないので、追跡しない。
+LeKiwi/

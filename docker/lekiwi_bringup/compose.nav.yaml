@@ -1,0 +1,100 @@
+# 実機で SLAM + Nav2 を動かすための compose。
+#
+#   docker compose -f compose.nav.yaml build
+#   docker compose -f compose.nav.yaml up
+#
+# ■ compose.yaml との違い
+#   lekiwi-base が base.launch.py → nav.launch.py に切り替わる。
+#   nav.launch.py は start_lidar:=false で起動するので、
+#   sllidar_node は rplidar コンテナ (下に定義) が担当する。
+#
+# ■ 起動前チェック
+#   * base.yaml の wheel_direction_signs / wheel_angle_offset_deg が実機合わせ済み
+#   * URDF の laser_link 位置が実測値に更新済み (TBD 仮値のままだと地図が歪む)
+#   * .env の LEKIWI_DEVICE / RPLIDAR_DEVICE が実機に合っている
+#
+# ■ 地図の保存 (別ターミナルから)
+#   nav.launch.py が map_saver_server を自動起動しているので、まずはこちら:
+#     make save-map [MAP_NAME=my_room]
+#   または直接:
+#     docker exec lekiwi-nav ros2 run lekiwi_base_bringup save_map my_room
+#   /maps/ (= ホストの MAP_DIR) に保存されるので docker cp は不要。
+#
+#   フォールバック (map_saver_server が使えない場合):
+#     docker exec lekiwi-nav ros2 run nav2_map_server map_saver_cli \
+#       -f /tmp/my_room --ros-args -p save_map_timeout:=10.0
+#     docker cp lekiwi-nav:/tmp/my_room.* ~/map/
+#     ★ 既定の save_map_timeout (2.0s) だと discovery が間に合わず
+#       "Failed to spin map subscription" で失敗することがある
+
+services:
+  lekiwi-nav:
+    build:
+      context: ../..
+      dockerfile: docker/lekiwi_base_ros2/Dockerfile
+    image: local/lekiwi-base-ros2:jazzy
+    container_name: lekiwi-nav
+    init: true
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+    devices:
+      - ${LEKIWI_DEVICE:-/dev/ttyACM0}:${LEKIWI_DEVICE:-/dev/ttyACM0}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # 地図の永続化。コンテナ内で保存した地図をホストから参照できる。
+      # ホスト側ディレクトリは MAP_DIR で変更可能 (既定: ~/maps)。
+      - ${MAP_DIR:-$HOME/maps}:/maps
+    command:
+      - ros2
+      - launch
+      - lekiwi_base_bringup
+      - nav.launch.py
+      - port:=${LEKIWI_DEVICE:-/dev/ttyACM0}
+      # sllidar_node は rplidar コンテナが担当する
+      - start_lidar:=false
+      - start_rviz:=${LEKIWI_START_RVIZ:-true}
+    # ★ モータドライバが勝手に復帰してホイールが回り出すのは危険
+    restart: "no"
+    # ★ rclpy がネイティブに扱うのは SIGINT
+    stop_signal: SIGINT
+    stop_grace_period: 20s
+    stdin_open: true
+    tty: true
+
+  rplidar:
+    build:
+      context: ../..
+      dockerfile: docker/rplidar_ros2/Dockerfile
+      args:
+        SLLIDAR_ROS2_REF: ${SLLIDAR_ROS2_REF:-main}
+    image: local/rplidar-a1-ros2:jazzy
+    container_name: rplidar-a1
+    network_mode: host
+    ipc: host
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+    devices:
+      - ${RPLIDAR_DEVICE:-/dev/ttyUSB0}:${RPLIDAR_DEVICE:-/dev/ttyUSB0}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    command:
+      - ros2
+      - launch
+      - rplidar_bringup
+      - a1_points.launch.py
+      - serial_port:=${RPLIDAR_DEVICE:-/dev/ttyUSB0}
+      - start_rviz:=false
+    restart: unless-stopped
+    stdin_open: true
+    tty: true

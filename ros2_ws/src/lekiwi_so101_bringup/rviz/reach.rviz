@@ -1,0 +1,201 @@
+# LeKiwi + SO-101 リーチ用の RViz 設定。
+#
+# ★ Fixed Frame は map。
+#   "Publish Point" ツールは Fixed Frame の座標で PointStamped を出すので、
+#   ここが odom や base_link だとリーチノードに REJECTED_WRONG_FRAME で弾かれる。
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Reach Target1
+      Splitter Ratio: 0.5
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+      Plane Cell Count: 20
+      Color: 160; 160; 164
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Topic:
+        Value: /robot_description
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 1
+      Visual Enabled: true
+      Collision Enabled: false
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Show Arrows: false
+      Marker Scale: 0.3
+    - Class: rviz_default_plugins/Map
+      Name: Map
+      Enabled: true
+      Topic:
+        Value: /map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.7
+    - Class: rviz_default_plugins/LaserScan
+      Name: Scan (filtered)
+      Enabled: true
+      Topic:
+        Value: /scan_filtered
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Size (m): 0.02
+      Style: Points
+      Color: 255; 85; 0
+      Color Transformer: FlatColor
+    # ---- Nav2 ----
+    # ★ ベースコンテナの nav2 は動いているのに、この設定に表示もツールも
+    #   無かったため RViz からナビゲーションを指示できなかった。
+    - Class: rviz_default_plugins/Path
+      Name: Global Plan
+      Enabled: true
+      Topic:
+        Value: /plan
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 0; 255; 0
+      Line Width: 0.02
+    # ★ MPPI コントローラが出すのは /optimal_trajectory。
+    #   nav2 の他のコントローラでよく使われる /local_plan は**この構成では存在しない**
+    #   (ros2 topic type で確認済み)。
+    - Class: rviz_default_plugins/Path
+      Name: Optimal Trajectory (MPPI)
+      Enabled: true
+      Topic:
+        Value: /optimal_trajectory
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 255; 0; 255
+      Line Width: 0.02
+    - Class: rviz_default_plugins/Map
+      Name: Global Costmap
+      Enabled: false
+      Topic:
+        Value: /global_costmap/costmap
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.4
+      Color Scheme: costmap
+    - Class: rviz_default_plugins/Map
+      Name: Local Costmap
+      Enabled: false
+      Topic:
+        Value: /local_costmap/costmap
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.4
+      Color Scheme: costmap
+    # ★ 走行時のフットプリント。nav2.yaml の robot_radius: 0.17 は
+    #   **アームを畳んだ状態**の前提。伸ばしたまま走ると通れない隙間を計画する。
+    - Class: rviz_default_plugins/Polygon
+      Name: Footprint
+      Enabled: true
+      Topic:
+        Value: /local_costmap/published_footprint
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 25; 255; 255
+    # ---- 手首カメラ ----
+    # ★ Fixed Frame が map なので、この点群は自動的に map 上の正しい位置に出る。
+    #   URDF が arm_gripper_link -> wrist_camera_link を繋いでいるため。
+    # ★ 既定は無効。realsense2_camera は購読者ゼロなら点群の生成自体を
+    #   スキップするので、切っている間はコストがゼロ。
+    # ★ Style を Points にしないこと。1px になり Publish Point で狙えない。
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Wrist Camera Cloud
+      Enabled: false
+      Topic:
+        Value: /wrist_camera/wrist_camera/depth/color/points
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Style: Flat Squares
+      Size (m): 0.005
+      Decay Time: 0
+      Color Transformer: RGB8
+      Selectable: true
+    # ★ 既定 false。WRIST_CAMERA=false のときフレームが存在せず
+    #   Displays が赤いエラーになるため。
+    - Class: rviz_default_plugins/Axes
+      Name: Wrist Camera
+      Enabled: false
+      Reference Frame: wrist_camera_link
+      Length: 0.1
+      Radius: 0.005
+    # リーチ目標。緑 = 受理、赤 = 棄却。
+    - Class: rviz_default_plugins/Marker
+      Name: Reach Target
+      Enabled: true
+      Topic:
+        Value: /so101/reach_markers
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+  Global Options:
+    Fixed Frame: map
+    Background Color: 48; 48; 48
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+    # ★ amcl の初期姿勢。保存地図構成では必須（起動直後は自己位置が未確定）。
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
+    # ★ ナビゲーションの目標。これが無いと RViz から走らせられない。
+    #   PoseStamped を /goal_pose へ出し、nav2 の bt_navigator が受ける。
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+    # ★ これがリーチ目標の入力。PointStamped を /clicked_point へ出す。
+    #   ナビゲーションの "2D Goal Pose" とは別物なので混同しないこと。
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Value: /clicked_point
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 2.5
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0.1
+      Pitch: 0.55
+      Yaw: 2.4
+      Target Frame: base_link
+Window Geometry:
+  Height: 900
+  Width: 1400
+  Displays:
+    collapsed: false

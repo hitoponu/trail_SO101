@@ -1,0 +1,54 @@
+# 仮想 LiDAR (fake_scan) の設定。実機の RPLIDAR がない状態で SLAM / Nav2 を
+# 回すための代用。★ 実機の LiDAR と同時に起動しないこと (/scan が二重になる)。
+#
+# 既定値は RPLIDAR A1M8 相当。frame_id は lekiwi_description のリンク名および
+# rplidar_bringup/launch/a1_points.launch.py の既定と揃えてある。
+# **3 箇所のうち 1 つだけ変えないこと。**
+
+/**:
+  ros__parameters:
+    # ── 仮想の世界 (すべて world_frame 座標) ────────────────────────
+    world_frame: odom          # dry_run では odom が真値になる
+    # 5m x 4m の部屋。中心が原点なので、起動位置は部屋の中央。
+    room_min_x: -2.5
+    room_min_y: -2.0
+    room_max_x: 2.5
+    room_max_y: 2.0
+    # 4 要素ずつ (min_x, min_y, max_x, max_y) の平坦な配列。
+    # ROS パラメータは入れ子の配列を扱えないためこの形式。
+    # 既定は箱を 2 つ。特徴が無い長方形の部屋だとスキャンマッチングが
+    # 縦横に滑るため、非対称に置いて SLAM が収束できるようにしている。
+    obstacles:
+      - 0.8
+      - -0.4
+      - 1.2
+      - 0.4
+      - -1.5
+      - 0.6
+      - -1.0
+      - 1.4
+
+    # ── スキャナ (RPLIDAR A1M8 相当) ────────────────────────────────
+    frame_id: laser_link
+    scan_topic: scan
+    samples: 360
+    range_min: 0.15
+    range_max: 12.0
+    rate_hz: 5.5
+    noise_stddev: 0.01         # A1M8 の精度は距離の約 1%。0 で完全な理想センサ
+    seed: 0                    # 固定 seed = 再現性あり
+
+    # ── odom の系統誤差 ────────────────────────────────────────────
+    # 1.0 = 誤差なし。dry_run の odom は指令値の積分で誤差ゼロなので、
+    # 既定のままだとスキャンマッチングが自明に成功して SLAM のロバスト性を
+    # 何も検証できない。
+    #
+    # 1.03 なら「odom が実際より 3% 多く報告する」= 車輪半径を 3% 大きく
+    # 見積もっている状態に相当し、SLAM が補正すべき誤差が生まれる。
+    # 実機投入前に Nav2 のパラメータを詰めるなら 1.02〜1.05 で試すとよい。
+    odom_trans_scale: 1.0
+    odom_yaw_scale: 1.0
+
+    # 真の壁を ~/world に MarkerArray で出す。RViz で SLAM の地図と重ねると
+    # 地図の歪みが一目で分かる。
+    publish_world_markers: true

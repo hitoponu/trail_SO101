@@ -1,0 +1,46 @@
+services:
+  lekiwi-base:
+    build:
+      context: ../..
+      dockerfile: docker/lekiwi_base_ros2/Dockerfile
+    image: local/lekiwi-base-ros2:jazzy
+    container_name: lekiwi-base
+    # tini を PID 1 に置く。シグナルを子プロセスへ転送し、ゾンビを回収する。
+    init: true
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      # Containers do not always have access to the host's /dev/dri device.
+      # Use Mesa software rendering by default; set to 0 in .env when passing a GPU.
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+    devices:
+      - ${LEKIWI_DEVICE:-/dev/ttyACM0}:${LEKIWI_DEVICE:-/dev/ttyACM0}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command:
+      - ros2
+      - launch
+      - lekiwi_base_bringup
+      - base.launch.py
+      - port:=${LEKIWI_DEVICE:-/dev/ttyACM0}
+      - start_rviz:=${START_RVIZ:-true}
+      - dry_run:=${DRY_RUN:-false}
+    # ★ rplidar とは異なり自動再起動しない。モータドライバが勝手に復帰して
+    #   ホイールが回り出すのは危険。
+    restart: "no"
+    # ★ rclpy がネイティブに扱うのは SIGINT。既定の SIGTERM では停止処理
+    #   (速度ゼロ + トルクOFF) が走らない。
+    stop_signal: SIGINT
+    # ★ 停止処理を完了させる猶予。これを過ぎると SIGKILL でホイールが
+    #   最後の指令速度のまま回り続ける。
+    stop_grace_period: 20s
+    stdin_open: true
+    tty: true

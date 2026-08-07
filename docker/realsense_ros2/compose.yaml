@@ -1,0 +1,35 @@
+services:
+  realsense:
+    build:
+      context: ../..
+      dockerfile: docker/realsense_ros2/Dockerfile
+    image: local/realsense-d435i-ros2:jazzy
+    container_name: realsense-d435i
+    network_mode: host
+    ipc: host
+    # USB passthrough for RealSense (Linux only)
+    # On macOS: USB passthrough requires USB/IP or colima with USB support.
+    # See README.md for macOS setup instructions.
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    command:
+      - ros2
+      - launch
+      - realsense_bringup
+      - d435i.launch.py
+      - camera_name:=${CAMERA_NAME:-camera}
+      - depth_fps:=${DEPTH_FPS:-30}
+      - color_fps:=${COLOR_FPS:-30}
+      - start_rviz:=${START_RVIZ:-true}
+    restart: unless-stopped
+    stdin_open: true
+    tty: true

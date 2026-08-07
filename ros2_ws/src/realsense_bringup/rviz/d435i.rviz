@@ -1,0 +1,56 @@
+Panels:
+  - Class: rviz_common/Displays
+  - Class: rviz_common/Selection
+  - Class: rviz_common/Tool Properties
+  - Class: rviz_common/Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: camera_link
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Plane Cell Count: 10
+      Cell Size: 0.5
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Marker Scale: 0.3
+    - Class: rviz_default_plugins/Image
+      Name: Color Image
+      Enabled: true
+      Topic:
+        Value: /camera/camera/color/image_raw
+        Reliability Policy: Best Effort
+        History Policy: Keep Last
+        Depth: 1
+      Normalize Range: true
+    - Class: rviz_default_plugins/Image
+      Name: Depth Image
+      Enabled: true
+      Topic:
+        Value: /camera/camera/depth/image_rect_raw
+        Reliability Policy: Best Effort
+        History Policy: Keep Last
+        Depth: 1
+      Normalize Range: true
+      Min Value: 0.1
+      Max Value: 5.0
+  Enabled: true
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 2.0
+      Pitch: 0.3
+      Yaw: 0.8
+Window Geometry:
+  Width: 1400
+  Height: 900

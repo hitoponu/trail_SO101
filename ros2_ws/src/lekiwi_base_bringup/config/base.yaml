@@ -1,0 +1,59 @@
+# LeKiwi ベースドライバの設定。
+#
+# ★ このファイルの wheel_direction_signs / wheel_angle_offset_deg / motor_ids は
+#   実機合わせで確定する「この機体のキャリブレーション値」。
+#   確定手順は docker/lekiwi_base_ros2/README.md の「動作確認」を参照。
+
+/**:
+  ros__parameters:
+    # ── 接続 ────────────────────────────────────────────────────────
+    port: /dev/lekiwi          # udev ルールで固定した名前。.env で上書き可
+    baudrate: 1000000          # lerobot と同じ 1 Mbps
+
+    # ── 機体構成 ────────────────────────────────────────────────────
+    # 順序は必ず left, back, right
+    motor_ids: [7, 8, 9]
+    wheel_radius: 0.05         # CAD 実測 0.050784、公称 0.05
+    # CAD 補正値は 0.1225 だが、実機検証済みコードと lerobot が 0.125 なので
+    # そちらに揃える。差はオープンループ odom の wz に 2% のスケール誤差のみ。
+    base_radius: 0.125
+
+    # ★ Phase D2 で調整する唯一のノブ。
+    #   lekiwi_description の車輪方位角 (left=60°, back=180°, right=300°) と
+    #   同じ規約から導かれている。片方だけ変えないこと。
+    #   前進方向が 90° ずれていたら 0.0 か -180.0、180° なら 90.0 にする。
+    wheel_angle_offset_deg: -90.0
+
+    # ★ Phase D1 で調整する。純回転 (angular.z) で 3 輪のリムが同じ向きに
+    #   回らない場合、逆を向く輪の要素を -1.0 にする。順序は left, back, right
+    wheel_direction_signs: [1.0, 1.0, 1.0]
+
+    # ── 速度制限 ────────────────────────────────────────────────────
+    # max_ticks が本当の上限を決める。ここから逆算される到達可能な速度は
+    #   x = 0.266 m/s, y = 0.230 m/s, wz = 105 deg/s (1.84 rad/s)
+    # 下の 3 つはそれ以下に設定する。超えても 3 輪比例縮小されるだけで
+    # 危険はないが、指令値と実速度が乖離して分かりにくくなる。
+    max_ticks: 3000
+    max_linear_x: 0.26         # m/s
+    max_linear_y: 0.23         # m/s
+    max_angular_z: 1.8         # rad/s (約 103 deg/s)
+
+    # ── 制御 ────────────────────────────────────────────────────────
+    control_rate_hz: 50.0
+    cmd_vel_timeout_s: 0.5     # これ以上 /cmd_vel が来なければ停止
+    servo_acceleration: 20     # レジスタ 41。負値で書き込みを省略
+                               # ガクつくなら上げる、急発進するなら下げる
+
+    # ── 出力 ────────────────────────────────────────────────────────
+    odom_frame: odom
+    base_frame: base_footprint
+    publish_tf: true
+    diagnostics_period_s: 5.0  # 電圧・温度の読み出し周期。0 で無効
+                               # 1 回あたり 9 回のシリアル往復が発生する
+
+    # ── 診断 ────────────────────────────────────────────────────────
+    dry_run: false             # true でシリアルを開かず odom/TF のみ出力
+    # 非空 (いずれかが 0 以外) なら /cmd_vel と運動学を無視して生 tick を書く。
+    # 1 輪ずつの切り分け用:
+    #   ros2 param set /lekiwi_base_driver test_wheel_ticks "[300,0,0]"
+    test_wheel_ticks: [0, 0, 0]

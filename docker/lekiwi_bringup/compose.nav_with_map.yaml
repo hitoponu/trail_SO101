@@ -1,0 +1,92 @@
+# 保存済みの地図で AMCL 自己位置推定 + Nav2 ナビゲーションを動かす compose。
+#
+#   # 初回: 地図ディレクトリを用意
+#   mkdir -p ~/maps
+#
+#   # ビルドは compose.nav.yaml と共通イメージなので build は不要 (済んでいれば)
+#   docker compose -f compose.nav_with_map.yaml up
+#
+# ■ compose.nav.yaml との違い
+#   * nav.launch.py (SLAM) → nav_with_map.launch.py (AMCL) に切り替わる
+#   * map_file 引数でコンテナ内の /maps/<MAP_NAME>.yaml を指定する
+#   * /maps ディレクトリはホストの MAP_DIR (既定: ~/maps) をマウント
+#
+# ■ 前提
+#   * compose.nav.yaml で地図を作成・保存済みであること
+#     (コンテナ内から: ros2 run nav2_map_server map_saver_cli -f /maps/my_room)
+#   * .env の MAP_NAME に保存したファイル名 (拡張子なし) を設定すること
+#
+# ■ 起動後の操作
+#   1. RViz の "2D Pose Estimate" で初期自己位置を与える
+#   2. RViz の "Nav2 Goal" でゴールを指定するとナビゲーションが始まる
+
+services:
+  lekiwi-nav-map:
+    build:
+      context: ../..
+      dockerfile: docker/lekiwi_base_ros2/Dockerfile
+    image: local/lekiwi-base-ros2:jazzy
+    container_name: lekiwi-nav-map
+    init: true
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+    devices:
+      - ${LEKIWI_DEVICE:-/dev/ttyACM0}:${LEKIWI_DEVICE:-/dev/ttyACM0}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # ホストの地図ディレクトリをコンテナの /maps に読み取り専用でマウント
+      - ${MAP_DIR:-$HOME/maps}:/maps:ro
+    command:
+      - ros2
+      - launch
+      - lekiwi_base_bringup
+      - nav_with_map.launch.py
+      - port:=${LEKIWI_DEVICE:-/dev/ttyACM0}
+      # sllidar_node は rplidar コンテナが担当する
+      - start_lidar:=false
+      - start_rviz:=${LEKIWI_START_RVIZ:-true}
+      # MAP_NAME は拡張子なしのファイル名 (.env で設定)
+      - map_file:=/maps/${MAP_NAME:-my_room}.yaml
+    restart: "no"
+    stop_signal: SIGINT
+    stop_grace_period: 20s
+    stdin_open: true
+    tty: true
+
+  rplidar:
+    build:
+      context: ../..
+      dockerfile: docker/rplidar_ros2/Dockerfile
+      args:
+        SLLIDAR_ROS2_REF: ${SLLIDAR_ROS2_REF:-main}
+    image: local/rplidar-a1-ros2:jazzy
+    container_name: rplidar-a1
+    network_mode: host
+    ipc: host
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+    devices:
+      - ${RPLIDAR_DEVICE:-/dev/ttyUSB0}:${RPLIDAR_DEVICE:-/dev/ttyUSB0}
+    group_add:
+      - ${DIALOUT_GID:-20}
+    command:
+      - ros2
+      - launch
+      - rplidar_bringup
+      - a1_points.launch.py
+      - serial_port:=${RPLIDAR_DEVICE:-/dev/ttyUSB0}
+      - start_rviz:=false
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
