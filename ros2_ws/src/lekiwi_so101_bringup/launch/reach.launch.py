@@ -80,10 +80,16 @@ def generate_launch_description():
                 "wrist_camera_parent": wrist_camera_parent.perform(context),
             }
         )
+        # ★ 空文字は「指定なし」の意味で、xacro へ渡さない。
+        #   常に渡していると、環境変数が無いときのフォールバック値が
+        #   **URDF の既定値を上書きしてしまう**。以前ここが "0.0" だったため、
+        #   .env が無いとカメラが gripper_link 原点に重なり、
+        #   幾何計算で入れた初期値がまったく効いていなかった。
+        #   渡さなければ URDF の既定値が使われる（＝ URDF が唯一の情報源）。
         for key in mount_keys:
-            mappings[f"wrist_camera_{key}"] = LaunchConfiguration(
-                f"wrist_camera_{key}"
-            ).perform(context)
+            value = LaunchConfiguration(f"wrist_camera_{key}").perform(context)
+            if value != "":
+                mappings[f"wrist_camera_{key}"] = value
 
         robot_description = build_robot_description(
             xacro_file,
@@ -164,9 +170,13 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "mock_wrist_camera_optical", default_value="false"),
             # ★ 取付姿勢は未実測。RViz でマゼンタのマーカーとして見える。
+            # ★ 既定は空文字＝「指定なし」。URDF の既定値（幾何計算による初期値）が
+            #   そのまま効く。.env で WRIST_CAMERA_* を設定したときだけ上書きする。
+            #   ここに数値を書くと URDF と二重管理になり、必ず片方が古くなる。
             *(DeclareLaunchArgument(
                 f"wrist_camera_{key}",
-                default_value=os.environ.get(f"WRIST_CAMERA_{key.upper()}", "0.0"))
+                default_value=os.environ.get(f"WRIST_CAMERA_{key.upper()}", ""),
+                description="空なら URDF の既定値を使う")
               for key in mount_keys),
             # ★ 実測待ち。arm_mount_link から見たアーム基部の姿勢。
             #   arm_mount_link 自体 (base_link から 0.08,-0.04,0.057) も CAD 由来で未実測。
