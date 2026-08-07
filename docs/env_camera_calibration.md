@@ -65,7 +65,12 @@ amcl の初期姿勢が安定し、較正値の劣化も抑えられます。
 - 測った高さ [m]
 - カメラのおおよその設置位置（`map` 原点＝ロボットのホーム位置から見て
   前後左右何 m か。**粗くて構いません**。ICP の初期値に使います）
-- カメラがどちらを向いているか（`map` の +x を 0 として時計回りに何度か。粗くて可）
+- カメラがどちらを向いているか（`map` の +x を 0 として時計回りに何度か）
+
+> **★ 向きは ±30° 以内で見積もってください。**「粗くて可」ではありません。
+> ICP は局所最適化なので、初期値が 1 rad（57°）ずれると
+> **`converged=True` のまま 41° 間違えた解に落ちます**（合成データで確認）。
+> 今回は残差とインライア率のゲートで弾かれますが、余裕があってのことです。
 
 ### 手順 C-2 🟢 起動して点群と IMU が出ているか確認する
 
@@ -74,10 +79,23 @@ cd docker/lekiwi_so101_bringup
 git pull
 make build
 make bootstrap        # ★ 飛ばすと起動できません
-make reach-with-map
+make reach-with-map   # コンテナを起動する（アームは待機状態）
 ```
 
-別ターミナルで、**以下の生出力をそのまま報告してください**。
+**★ `make reach-with-map` はコンテナを上げるだけです。** RViz・robot_state_publisher・
+リーチノード・カメラの static TF は、別ターミナルで launch を明示的に起動して
+初めて上がります。
+
+```bash
+docker compose -f compose.with_map.yaml exec -it lekiwi-so101-arm /entrypoint.sh \
+  ros2 launch lekiwi_so101_bringup reach.launch.py \
+    backend:=lerobot robot_id:=<較正ID>
+```
+
+較正値（`ENV_CAMERA_*`）と `START_ENV_CAMERA_TF` は `.env` から compose の
+`environment` 経由で launch の既定値になるので、**launch 行に書く必要はありません**。
+
+さらに別ターミナルで、**以下の生出力をそのまま報告してください**。
 
 ```bash
 E="docker exec lekiwi-so101-arm /entrypoint.sh"

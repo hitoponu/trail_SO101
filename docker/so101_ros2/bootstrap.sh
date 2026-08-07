@@ -54,6 +54,9 @@ source install/setup.bash
 
 python3 -c "from so101_bringup import bridge_core, cartesian_jog, cartesian_math, \
     keyboard_input, lerobot_backend, lerobot_bridge, reach_solver, reach_to_point"
+# ★ 合成側も検査する。ここが漏れていると、依存が欠けていても Mac では気付かず、
+#   実機で ros2 run した瞬間に ModuleNotFoundError になる。
+python3 -c "from lekiwi_so101_bringup import env_camera_calib, gravity, icp2d"
 python3 -c "import lerobot; from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig"
 echo "  Python import: OK"
 

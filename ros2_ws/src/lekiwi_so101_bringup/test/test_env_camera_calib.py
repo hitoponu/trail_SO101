@@ -204,6 +204,89 @@ def test_result_is_always_finite():
             assert math.isfinite(result.residual)
 
 
+def test_hitting_the_iteration_cap_still_gives_a_good_pose():
+    """★ converged は打ち切り判定であって姿勢の良し悪しではない。
+
+    上限に達しただけで棄却すると、実機の深度ノイズで**正しい較正が捨てられる**。
+    ノードは残差とインライア率で判断し、上限到達は警告に留めている。
+    """
+    rng = np.random.default_rng(42)
+    truth = (1.2, -0.6, 0.35)
+    room = _wide_room()
+    observed = icp2d.transform2d(room, *_inverse(truth)) \
+        + rng.normal(0.0, 0.02, size=(len(room), 2))
+    capped = icp2d.match(observed, room, initial=(0.7, -1.1, -0.05), max_iterations=60)
+    assert not capped.converged                      # 上限に達する
+    assert capped.residual < 0.05                    # なのに残差は小さい
+    assert math.hypot(capped.x - truth[0], capped.y - truth[1]) < 0.02   # 姿勢も正しい
+
+
+def _wide_room(n=600):
+    """6m x 4m。_room より広く、ICP の収束が遅いシーン。"""
+    rng = np.random.default_rng(7)
+    xs = rng.uniform(-3, 3, n)
+    ys = rng.uniform(-2, 2, n)
+    return np.vstack([
+        np.column_stack([xs, np.full(n, -2.0)]),
+        np.column_stack([xs, np.full(n, 2.0)]),
+        np.column_stack([np.full(n, -3.0), ys]),
+        np.column_stack([np.full(n, 3.0), ys]),
+    ])
+
+
+def test_loose_tolerance_can_stop_early_at_a_wrong_answer():
+    """★ 反復不足を tolerance を緩めて誤魔化してはいけない。
+
+    収束判定は「残差 RMS の変化が tolerance を下回ったか」でしかないので、
+    まだ真値から遠くても残差の減りが一時的に鈍れば成立してしまう。
+    このシーン（6m x 4m、初期値 0.5m ずれ）では 1e-4 にすると 6 反復で
+    「収束」し、真値から 60cm 以上離れた解を返す。
+
+    ★ シーン依存であることに注意（4m x 3m の _room では起きない）。
+      だからこそ「うちの部屋では平気だった」を根拠に緩めてはいけない。
+      反復が足りないなら max_iterations を上げること。
+    """
+    rng = np.random.default_rng(42)
+    truth = (1.2, -0.6, 0.35)
+    room = _wide_room()
+    observed = icp2d.transform2d(room, *_inverse(truth)) \
+        + rng.normal(0.0, 0.02, size=(len(room), 2))
+
+    loose = icp2d.match(observed, room, initial=(0.7, -1.1, -0.05), tolerance=1e-4)
+    assert loose.converged                                            # 収束したと言い張るが
+    assert math.hypot(loose.x - truth[0], loose.y - truth[1]) > 0.1   # 大きく外れている
+
+    tight = icp2d.match(observed, room, initial=(0.7, -1.1, -0.05))   # 既定の 1e-5
+    assert tight.converged
+    assert math.hypot(tight.x - truth[0], tight.y - truth[1]) < 0.02
+
+
+def test_default_max_iterations_converges_where_60_did_not():
+    rng = np.random.default_rng(42)
+    truth = (1.2, -0.6, 0.35)
+    room = _wide_room()
+    observed = icp2d.transform2d(room, *_inverse(truth)) \
+        + rng.normal(0.0, 0.02, size=(len(room), 2))
+    result = icp2d.match(observed, room, initial=(0.7, -1.1, -0.05))
+    assert result.converged
+    assert math.hypot(result.x - truth[0], result.y - truth[1]) < 0.02
+
+
+def test_gravity_health_rejects_constant_amplitude_wobble():
+    """★ ノルムがほぼ一定の揺れ（振動・一定角速度の回転）を捕まえる。
+
+    ばらつきを std で見ていると、この場合ゼロに近くなって通ってしまう。
+    """
+    phase = np.linspace(0.0, 4 * math.pi, 300)
+    tilt = 0.15
+    samples = G * np.column_stack([
+        tilt * np.cos(phase), tilt * np.sin(phase),
+        np.full_like(phase, math.sqrt(1 - tilt ** 2)),
+    ])
+    ok, message = gravity_health(samples)
+    assert not ok, message
+
+
 def _inverse(pose):
     x, y, yaw = pose
     c, s = math.cos(-yaw), math.sin(-yaw)

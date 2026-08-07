@@ -45,10 +45,16 @@ def gravity_health(samples, tolerance: float = 0.5) -> tuple[bool, str]:
             f"平均ノルムが {norm:.3f} m/s^2 で重力 {G:.3f} から外れている "
             "(静止していない / 単位が違う / 軸が欠けている)"
         )
-    # 各サンプルの平均からのばらつき。静止していれば小さいはず。
-    spread = float(np.linalg.norm(array - mean, axis=1).std())
+    # 各サンプルの平均からのずれ。静止していれば小さいはず。
+    # ★ std ではなく max を見る。std は「ずれのノルムの標準偏差」なので、
+    #   一定振幅の振動や一定角速度の回転のように**ノルムがほぼ一定の揺れ**では
+    #   ゼロに近くなり、静止していないのに通ってしまう。
+    deviation = np.linalg.norm(array - mean, axis=1)
+    spread = float(deviation.max())
     if spread > tolerance:
-        return False, f"サンプルのばらつきが大きい (std={spread:.3f} m/s^2)。静止していない可能性"
+        return False, (
+            f"サンプルのばらつきが大きい (最大 {spread:.3f} m/s^2)。静止していない可能性"
+        )
     return True, f"norm={norm:.3f} m/s^2, spread={spread:.3f}"
 
 

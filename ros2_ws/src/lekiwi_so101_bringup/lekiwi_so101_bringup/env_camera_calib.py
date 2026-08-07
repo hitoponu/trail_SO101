@@ -140,9 +140,26 @@ class EnvCameraCalib(Node):
 
     @property
     def ready(self) -> bool:
-        return (self._map is not None
-                and len(self._accel) >= self._want_accel
-                and len(self._clouds) >= self._want_frames)
+        """収集完了。★ TF が引けることまで含める。
+
+        solve() は収集ループを抜けた後に呼ばれ、そこでは誰も spin していない。
+        したがって lookup_transform の timeout は待つだけで**リトライにならず**、
+        buffer にまだ無い TF は永久に来ない。加速度計は 250Hz なので 200 サンプルは
+        0.8 秒で埋まり、/tf_static の配送がそれに間に合わないことがある。
+        ここで TF まで待てば、その間欠故障が起きない。
+        """
+        if (self._map is None
+                or len(self._accel) < self._want_accel
+                or len(self._clouds) < self._want_frames):
+            return False
+        return not self._missing_transforms()
+
+    def _missing_transforms(self) -> list[str]:
+        link = f"{self._camera}_link"
+        frames = {self._accel_frame} | {frame for _, frame in self._clouds}
+        return [f"{frame} -> {link}" for frame in frames
+                if frame and frame != link
+                and not self._buffer.can_transform(link, frame, Time())]
 
     def missing(self) -> list[str]:
         out = []
@@ -154,6 +171,8 @@ class EnvCameraCalib(Node):
         if len(self._clouds) < self._want_frames:
             out.append(f"{self._cloud_topic}（{len(self._clouds)}/{self._want_frames}。"
                        "enable_pointcloud:=true になっているか）")
+        out += [f"TF {m}（realsense2_camera が publish_tf:=true で動いているか）"
+                for m in self._missing_transforms()]
         return out
 
     # ------------------------------------------------------------- 計算
@@ -199,6 +218,16 @@ class EnvCameraCalib(Node):
 
         # 4. 占有格子へ合わせる
         grid = self._map
+        # ★ occupied_cells は origin の並進しか使わない。姿勢が非ゼロだと
+        #   全セルの座標が狂い、ICP は「それらしく収束」して**黙って間違った
+        #   較正値**を出す。slam_toolbox も map_server も通常は単位四元数だが、
+        #   前提が崩れていたら止める。
+        q = grid.info.origin.orientation
+        if abs(q.x) > 1e-6 or abs(q.y) > 1e-6 or abs(q.z) > 1e-6 or abs(q.w - 1.0) > 1e-6:
+            self.get_logger().error(
+                f"地図原点の姿勢が単位四元数でない (x={q.x} y={q.y} z={q.z} w={q.w})。"
+                "この較正は回転した地図に対応していない")
+            return 1
         target = icp2d.occupied_cells(
             grid.data, grid.info.width, grid.info.height, grid.info.resolution,
             grid.info.origin.position.x, grid.info.origin.position.y)
@@ -220,8 +249,15 @@ class EnvCameraCalib(Node):
             f"残差 RMS={result.residual*100:.1f}cm  インライア率={result.inlier_ratio:.2f}")
 
         bad = []
+        # ★ 上限に達しただけなら棄却しない。converged は「残差の変化が
+        #   tolerance を下回った」という打ち切り判定にすぎず、姿勢の良し悪しでは
+        #   ない。実際、初期値が 0.5m ずれた合成シーンでは 60 反復では
+        #   converged=False のまま xy 誤差 0.44cm の正しい解が出ていた。
+        #   品質は残差とインライア率で判断する。
         if not result.converged:
-            bad.append("収束しなかった")
+            self.get_logger().warning(
+                f"反復上限 {result.iterations} に達した（残差の変化が収束判定を"
+                "下回らなかった）。残差とインライア率が基準内なら採用する")
         if not all(math.isfinite(v) for v in result.as_tuple()):
             bad.append("発散した")
         if result.inlier_ratio < self._min_inlier:

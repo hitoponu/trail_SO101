@@ -26,6 +26,7 @@
   (CLAUDE.md の「RViz に別のロボットが出る」症状)。
 """
 
+import os
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -117,17 +118,19 @@ def generate_launch_description():
             #   RViz と同じプロセスに置くことで「点群が出ない」の切り分けが
             #   1 箇所で済む (TF が無い / 点群が来ていない / RViz の設定、の区別)。
             #   カメラそのものは別コンテナ (lekiwi-realsense) が起動する。
-            DeclareLaunchArgument("start_env_camera_tf", default_value="false"),
+            DeclareLaunchArgument(
+                "start_env_camera_tf",
+                default_value=os.environ.get("START_ENV_CAMERA_TF", "false")),
             DeclareLaunchArgument("env_camera_name", default_value="env_camera"),
             DeclareLaunchArgument("mock_optical_frames", default_value="false"),
-            # ★ 較正値。env_camera_calib の出力を .env 経由で渡す。
-            #   既定は未実測の仮値 (env_camera.launch.py の既定と同じ)。
-            DeclareLaunchArgument("env_camera_x", default_value="1.5"),
-            DeclareLaunchArgument("env_camera_y", default_value="0.0"),
-            DeclareLaunchArgument("env_camera_z", default_value="1.0"),
-            DeclareLaunchArgument("env_camera_roll", default_value="0.0"),
-            DeclareLaunchArgument("env_camera_pitch", default_value="0.4"),
-            DeclareLaunchArgument("env_camera_yaw", default_value="3.14159"),
+            # ★ 較正値。既定は環境変数 ENV_CAMERA_* から読む
+            #   (.env -> compose の environment -> ここ)。手打ち不要。
+            *(DeclareLaunchArgument(
+                f"env_camera_{key}",
+                default_value=os.environ.get(f"ENV_CAMERA_{key.upper()}", fallback))
+              for key, fallback in (("x", "1.5"), ("y", "0.0"), ("z", "1.0"),
+                                    ("roll", "0.0"), ("pitch", "0.4"),
+                                    ("yaw", "3.14159"))),
             # ★ 実測待ち。arm_mount_link から見たアーム基部の姿勢。
             #   arm_mount_link 自体 (base_link から 0.08,-0.04,0.057) も CAD 由来で未実測。
             #   docs/agent/request.md の手順 0 / 3 で確定させる。

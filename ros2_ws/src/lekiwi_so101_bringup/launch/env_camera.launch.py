@@ -9,12 +9,14 @@
 
 ★ 既定値は未実測の仮値 (ENV_CAMERA_*_TBD)。この repo の laser_xyz_TBD /
   camera_xyz_TBD と同じ流儀で、実測が返るまで「置いてあるだけ」の値。
-  較正手順は docker/lekiwi_so101_bringup/README.md。
+  較正手順は docs/env_camera_calibration.md。
 
 mock_optical_frames:=true にすると、カメラ実機が無い環境でも
 env_camera_link -> env_camera_depth_optical_frame を static で生やし、
 TF ツリーの疎通と座標変換の向きだけを Mac で検証できる。
 """
+
+import os
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -39,13 +41,15 @@ def generate_launch_description():
             description="★ 較正値を凍結するフレーム。map 以外にすると "
                         "保存地図の運用前提が崩れる",
         ),
-        # ★ 実測待ちの仮値。較正 (env_camera_calib) が出す 6 数値で置き換える。
-        DeclareLaunchArgument("env_camera_x", default_value="1.5"),
-        DeclareLaunchArgument("env_camera_y", default_value="0.0"),
-        DeclareLaunchArgument("env_camera_z", default_value="1.0"),
-        DeclareLaunchArgument("env_camera_roll", default_value="0.0"),
-        DeclareLaunchArgument("env_camera_pitch", default_value="0.4"),
-        DeclareLaunchArgument("env_camera_yaw", default_value="3.14159"),
+        # ★ 較正値。既定は環境変数 ENV_CAMERA_* から読む。
+        #   env_camera_calib の出力を .env に貼れば、compose の environment 経由で
+        #   ここに届く。launch 行に 6 個の引数を手打ちする必要は無い。
+        #   環境変数も無ければ未実測の仮値になる（RViz でマゼンタ相当の扱い）。
+        *(DeclareLaunchArgument(f"env_camera_{key}",
+                                default_value=os.environ.get(f"ENV_CAMERA_{key.upper()}",
+                                                             fallback))
+          for key, fallback in (("x", "1.5"), ("y", "0.0"), ("z", "1.0"),
+                                ("roll", "0.0"), ("pitch", "0.4"), ("yaw", "3.14159"))),
         DeclareLaunchArgument(
             "mock_optical_frames",
             default_value="false",

@@ -2,8 +2,8 @@
 
 環境固定で使う場合（三脚などに据え置き、ロボットには載せない）は
 `camera_name:=env_camera` とし、`lekiwi_so101_bringup/launch/env_camera.launch.py`
-が `map -> env_camera_link` の static TF を出す。詳細は
-`docker/lekiwi_so101_bringup/README.md`。
+が `map -> env_camera_link` の static TF を出す。較正手順は
+`docs/env_camera_calibration.md`。
 """
 
 from pathlib import Path

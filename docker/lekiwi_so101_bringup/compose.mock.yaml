@@ -68,6 +68,15 @@ services:
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
       ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
       ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
+      # ★ 較正値。env_camera_calib の出力を .env に貼れば、
+      #   reach.launch.py の既定値としてここから読まれる（手打ち不要）。
+      START_ENV_CAMERA_TF: ${START_ENV_CAMERA_TF:-true}
+      ENV_CAMERA_X: ${ENV_CAMERA_X:-1.5}
+      ENV_CAMERA_Y: ${ENV_CAMERA_Y:-0.0}
+      ENV_CAMERA_Z: ${ENV_CAMERA_Z:-1.0}
+      ENV_CAMERA_ROLL: ${ENV_CAMERA_ROLL:-0.0}
+      ENV_CAMERA_PITCH: ${ENV_CAMERA_PITCH:-0.4}
+      ENV_CAMERA_YAW: ${ENV_CAMERA_YAW:-3.14159}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       # ★ ROS ワークスペースは常にホストからマウントする。

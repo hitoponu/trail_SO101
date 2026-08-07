@@ -76,13 +76,21 @@ def kabsch2d(source, target) -> tuple[float, float, float]:
     return float(translation[0]), float(translation[1]), yaw
 
 
-def _nearest(source, target, chunk: int = 256) -> tuple[np.ndarray, np.ndarray]:
+#: 距離行列 1 チャンクあたりの要素数の目安（float64 で約 32MB）。
+_CHUNK_ELEMENTS = 4_000_000
+
+
+def _nearest(source, target, chunk: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """総当たりの最近傍。scipy が無いので numpy で書く。
 
     ★ source をチャンクに切って処理する。素直に (N, M, 2) の差分を作ると
       点群 4000 点 × 地図 3000 セルで 200MB 近くになり、実機の PC で
-      メモリを圧迫する。チャンク化すればピークは chunk x M に抑えられる。
+      メモリを圧迫する。
+    ★ chunk は占有セル数 M から決める。固定値にするとピークが M に線形のままで、
+      広い部屋や家具込みの地図（M が数万）で結局あふれる。
     """
+    if chunk <= 0:
+        chunk = max(1, _CHUNK_ELEMENTS // max(1, len(target)))
     index = np.empty(len(source), dtype=np.intp)
     distance = np.empty(len(source), dtype=float)
     for start in range(0, len(source), chunk):
@@ -100,7 +108,7 @@ def match(
     target,
     initial=(0.0, 0.0, 0.0),
     *,
-    max_iterations: int = 60,
+    max_iterations: int = 200,
     trim_ratio: float = 0.7,
     max_correspondence: float = 0.5,
     tolerance: float = 1e-5,
@@ -113,7 +121,13 @@ def match(
 
     trim_ratio: 残差の小さいほうから何割を使うか。カメラには見えるが地図に
                 無いもの（机・椅子・人）を落とすために必須。
+                ★ inlier_ratio の上限は構造的にこの値になる（keep は trim 後の集合）。
+                  min_inlier_ratio を決めるときはこの値と合わせて考えること。
     max_correspondence: この距離を超える対応は初めから捨てる [m]。
+    tolerance: 残差 RMS の変化がこれを下回ったら収束とみなす [m]。
+               ★ 緩めてはいけない。1e-4 にすると初期値が 0.5m ずれた場面で
+                 6 反復で「収束」し、真値から 62cm 離れた解を返す（合成データで確認）。
+                 反復が足りないなら max_iterations を上げること。
     """
     src = np.asarray(source, dtype=float)
     dst = np.asarray(target, dtype=float)
