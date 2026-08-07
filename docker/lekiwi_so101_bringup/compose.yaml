@@ -206,6 +206,8 @@ services:
       - decimation:=${WRIST_CAMERA_DECIMATION:-2}
       # RViz はアームコンテナが唯一持つ。
       - start_rviz:=false
-    restart: unless-stopped
+    # ★ unless-stopped にしないこと。make down 後もデーモン再起動を跨いで
+    #   独りで生き残り、make mock したときに模擬光学フレームと衝突する。
+    restart: "no"
     stdin_open: true
     tty: true

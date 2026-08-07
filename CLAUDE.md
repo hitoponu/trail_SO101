@@ -21,6 +21,7 @@ Linux PC 側で作業する agent は `docs/hardware_agent.md` を必ず読む�
 | `feat/lekiwi-base-ros2` | LeKiwi ベース。3輪オムニ、自作 rclpy ドライバ |
 | `feat/lekiwi-nav2-slam` | 上記ベース + RPLIDAR + slam_toolbox + Nav2 |
 | `feat/lekiwi-so101-reach` | **統合ブランチ**。nav2-slam から分岐し so101 をマージ。`map` 上の点へアームでリーチ |
+| `feat/wrist-camera` | 上記から分岐。RealSense を**アームの手首に**載せ、点群を `map` 上に置く（較正不要。TF から出る） |
 
 前3つは `main` から分岐。`README.md` / `.dockerignore` / `.gitignore` で軽く衝突する
 （`ros2_ws/src/` と `docker/` は不干渉なので、衝突するのは常にこの3つだけ）。

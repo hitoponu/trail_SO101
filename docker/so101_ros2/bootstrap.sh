@@ -97,6 +97,14 @@ if want - joints:
 need = {'arm_base_link', 'arm_gripper_frame_link', 'base_footprint'}
 if not need <= set(links):
     sys.exit(f'必要なリンクが無い: {sorted(need - set(links))}')
+# ★ 手首カメラ: <name>_link を子とする joint が**ちょうど 1 個**であること。
+#   realsense2_camera は <name>_link を子にする TF を出さない前提なので、
+#   URDF 側が 1 個だけ親を与えるのが正しい。0 個なら孤立フレームになり
+#   map -> 点群 が解けず、2 個なら tf2 が後着勝ちで非決定になる。
+cam = [j for j in root.findall('joint')
+       if j.find('child').get('link') == 'wrist_camera_link']
+if 'wrist_camera_link' in links and len(cam) != 1:
+    sys.exit(f'wrist_camera_link を子とする joint が {len(cam)} 個 (1 であること)')
 PY
 echo "  結合 URDF: OK"
 

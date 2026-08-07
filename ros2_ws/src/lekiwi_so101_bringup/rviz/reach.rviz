@@ -137,9 +137,11 @@ Visualization Manager:
       Decay Time: 0
       Color Transformer: RGB8
       Selectable: true
+    # ★ 既定 false。WRIST_CAMERA=false のときフレームが存在せず
+    #   Displays が赤いエラーになるため。
     - Class: rviz_default_plugins/Axes
       Name: Wrist Camera
-      Enabled: true
+      Enabled: false
       Reference Frame: wrist_camera_link
       Length: 0.1
       Radius: 0.005

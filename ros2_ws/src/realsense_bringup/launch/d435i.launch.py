@@ -36,6 +36,8 @@ def generate_launch_description():
     enable_imu = LaunchConfiguration("enable_imu")
     align_depth = LaunchConfiguration("align_depth")
     decimation = LaunchConfiguration("decimation")
+    temporal_filter = LaunchConfiguration("temporal_filter")
+    spatial_filter = LaunchConfiguration("spatial_filter")
     start_rviz = LaunchConfiguration("start_rviz")
 
     rviz_config = str(
@@ -65,8 +67,8 @@ def generate_launch_description():
         DeclareLaunchArgument("color_width", default_value="640"),
         DeclareLaunchArgument("color_height", default_value="480"),
         # ★ 点群を出すなら 30fps は重すぎる。640x480 の点群は 1 枚 4.9MB あり、
-        #   30Hz では 147MB/s になる。環境固定でシーンも静止しているので
-        #   低レートで十分 (decimation ×2 と併用して 6fps で約 7MB/s)。
+        #   30Hz では 147MB/s になる。静止して撮る運用なので低レートで十分
+        #   (decimation ×2 と併用して 6fps で約 7MB/s)。
         DeclareLaunchArgument("depth_fps", default_value="6"),
         DeclareLaunchArgument("color_fps", default_value="6"),
 
@@ -92,6 +94,13 @@ def generate_launch_description():
             default_value="2",
             description="点群の間引き。2 で点数 1/4",
         ),
+        DeclareLaunchArgument(
+            "temporal_filter",
+            default_value="false",
+            description="★ 静止して撮るときだけ true。手首カメラは動くので、"
+                        "動作中に有効だと過去フレームを混ぜて深度を引きずる",
+        ),
+        DeclareLaunchArgument("spatial_filter", default_value="false"),
         DeclareLaunchArgument("start_rviz", default_value="true"),
 
         Node(
@@ -133,9 +142,13 @@ def generate_launch_description():
                 #          -> pointcloud -> align_depth。
                 "decimation_filter.enable": True,
                 "decimation_filter.filter_magnitude": decimation,
-                # カメラも被写体も静止しているので時間平均がいちばん効く。
-                "temporal_filter.enable": True,
-                "spatial_filter.enable": True,
+                # ★ 既定 false（上流と同じ）。手首カメラは**カメラ自身が動く**ので、
+                #   temporal フィルタは過去フレームを混ぜて動作中の深度を引きずる。
+                #   静止して撮る運用なら true にすると効く。
+                #   環境固定カメラ（別ブランチ）はカメラも被写体も静止しているので
+                #   常時 true でよいが、ここでは前提が逆になる。
+                "temporal_filter.enable": temporal_filter,
+                "spatial_filter.enable": spatial_filter,
                 # ★ 穴埋めは有効にしない。存在しない点を捏造するので、
                 #   それをクリックすると「実在しない目標」へアームが動く。
                 "hole_filling_filter.enable": False,

@@ -34,7 +34,11 @@ MOCK_START_RVIZ ?= false
 #   必ず入れること (以前これが抜けていた)。
 #   rplidar-a1 はこのスタック自身が使うので対象外。
 CONFLICTS_FOR_REACH := so101-follower lekiwi-base lekiwi-nav-mock lekiwi-so101-arm-mock realsense-d435i
-CONFLICTS_FOR_MOCK  := so101-follower lekiwi-base lekiwi-nav lekiwi-so101-arm realsense-d435i
+# ★ lekiwi-wrist-camera は**このスタック自身のコンテナ**だが、モック側の guard に
+#   必ず入れる。実機カメラが生き残ったまま make mock すると、モックの模擬光学
+#   フレームと実機の光学フレームが**同じ子フレームに 2 つの親**を持ち、
+#   tf2 は後着が勝つので非決定になる。
+CONFLICTS_FOR_MOCK  := so101-follower lekiwi-base lekiwi-nav lekiwi-so101-arm realsense-d435i lekiwi-wrist-camera
 
 .PHONY: build bootstrap mock reach shell stow save-map check down logs guard guard-mock
 
@@ -45,6 +49,18 @@ CONFLICTS_FOR_MOCK  := so101-follower lekiwi-base lekiwi-nav lekiwi-so101-arm re
 bootstrap:
 	docker compose -f compose.mock.yaml run --rm --no-deps \
 		lekiwi-so101-arm-mock bash /bootstrap.sh
+
+# TF を 1 行表示する。$(1)=コンテナ, $(2)=親, $(3)=子, $(4)=出なかったときの助言。
+#
+# ★ `... | head -1 || echo fallback` は**絶対に発火しない**。パイプラインの
+#   終了ステータスは head のもので、入力が空でも 0 になるため。その結果
+#   「TF が無い」と「検査が空振りした」を区別できなかった (レビュー指摘)。
+#   変数に取ってから中身の有無で分岐する。
+# ★ timeout は 15 秒。tf2_echo は discovery が終わるまで何も出さないので、
+#   短いと TF はあるのに空になりうる。
+define echo_tf
+out=$$(docker exec $(1) $(E) timeout 15 ros2 run tf2_ros tf2_echo $(2) $(3) 2>/dev/null | grep -a Translation | head -1); if [ -n "$$out" ]; then echo "$$out"; else echo "  ★ $(2) -> $(3) が引けない ($(4))"; fi
+endef
 
 # $(1) に渡した名前のコンテナが動いていたら止める。
 define guard_against
@@ -120,13 +136,9 @@ check:
 	echo "--- controllers (期待: active 3 つ) ---"; \
 	docker exec $$C $(E) ros2 control list_controllers; \
 	echo "--- map -> wrist_camera_depth_optical_frame ---"; \
-	docker exec $$C $(E) timeout 5 \
-	  ros2 run tf2_ros tf2_echo map wrist_camera_depth_optical_frame 2>/dev/null \
-	  | grep -a Translation | head -1 || echo "  (手首カメラ TF 無し)"; \
+	$(call echo_tf,$$C,map,wrist_camera_depth_optical_frame,realsense が未起動か camera_name 不一致); \
 	echo "--- map -> arm_gripper_frame_link ---"; \
-	docker exec $$C $(E) timeout 5 \
-	  ros2 run tf2_ros tf2_echo map arm_gripper_frame_link 2>/dev/null \
-	  | grep -a Translation | head -1 || echo "  (TF 未確立)"
+	$(call echo_tf,$$C,map,arm_gripper_frame_link,RSP かコントローラが未起動)
 
 define stop_arm_launch
 	@if docker ps -q -f name=^$(1)$$ | grep -q .; then \

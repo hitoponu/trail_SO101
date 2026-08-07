@@ -16,7 +16,10 @@ LeKiwi 移動ベースに SO-101 アームを載せ、**`map` 座標系に固定
             └ base_footprint → base_link
                                ├ laser_link      ← RPLIDAR
                                └ arm_mount_link
-                                  └ arm_base_link … arm_gripper_frame_link
+                                  └ arm_base_link … arm_gripper_link
+                                       ├ arm_gripper_frame_link  ← リーチの手先
+                                       └ wrist_camera_mount_link
+                                          └ wrist_camera_link  ← 手首カメラ
 ```
 
 | コンテナ | イメージ | 役割 |
@@ -24,8 +27,9 @@ LeKiwi 移動ベースに SO-101 アームを載せ、**`map` 座標系に固定
 | `lekiwi-nav` | `lekiwi-base-ros2` | base_driver, scan_filter, slam_toolbox, Nav2 |
 | `rplidar-a1` | `rplidar-a1-ros2` | sllidar_node → `/scan` |
 | `lekiwi-so101-arm` | `so101-ros2` | **robot_state_publisher（結合、唯一）**, LeRobot ブリッジ, ros2_control, リーチノード, **RViz（唯一）** |
+| `lekiwi-wrist-camera` | `realsense-d435i-ros2` | 手首カメラ。点群 → `wrist_camera_depth_optical_frame` |
 
-### なぜ 3 コンテナなのか
+### なぜコンテナを分けるのか
 
 2 つのサブシステムで**安全論理が逆**だから。
 
@@ -307,6 +311,9 @@ $E ros2 run tf2_ros tf2_echo map wrist_camera_link      # 動かす前後で変�
 >
 > ★ **移動中の点群は信用しない。**深度は動くと荒れる。静止して撮ること。
 >
+> 実機の取り付け手順は **[`docs/wrist_camera.md`](../../docs/wrist_camera.md)**。
+> ★ **無通電での保持力確認（積載重量）と干渉確認が終わるまで通電しないこと。**
+>
 > ★ D435i の最短測距は約 0.1〜0.2m。**手首カメラは対象に近づくので、
 > リーチ目標の距離では測距範囲を下回る可能性がある**（実機で要確認）。
 
@@ -385,6 +392,7 @@ $E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped 
 | アームのブリッジが fault（シリアル異常・watchdog） | **アームだけ**。トルクが切れて脱力する。`robot_state_publisher` は生き残るので、ベースの slam / Nav2 は測位を失わない | launch を上げ直す |
 | ベースのコンテナが停止 | `odom` が止まり slam が更新されない。アームの TF は残る。**リーチは `REJECTED_STALE_ODOM` で止まる** | `compose.yaml` は `restart: "no"` なので手動 |
 | **アームのコンテナを再起動** | RSP が一時的に消えるため slam がスキャンを落とし、`map`→`odom` が出なくなる。**自動では戻らない**（モックで確認） | **ベース側も再起動する**必要がある |
+| **カメラのコンテナが停止** | 点群が止まるだけ。TF もリーチもナビも影響を受けない（カメラは URDF 側にリンクがあるだけで、誰も購読を必須にしていない） | 手動で起動 |
 | slam_toolbox が停止 | `map`→`odom` が凍る。**リーチは `REJECTED_STALE_TF` で止まる**（黙って古い座標で解かない） | slam を上げ直す |
 
 > ★ 合成構成では `follower.launch.py` を `shutdown_on_bridge_exit:=false` で
