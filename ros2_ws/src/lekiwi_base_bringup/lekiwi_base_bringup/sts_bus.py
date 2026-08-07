@@ -250,6 +250,21 @@ class StsBus:
             except StsBusError:
                 pass
 
+    def read_torque_enable(self) -> dict[int, int | None]:
+        """各 ID の ``Torque_Enable`` を読む。読めなかった ID は ``None``。
+
+        ``disable_torque()`` は ID ごとの失敗を握り潰すので、「呼べた」ことは
+        「切れた」ことを意味しない。本当に切れたかはこれで確かめる。
+        ``lekiwi_so101_bringup.release_all`` が結果表示に使う。
+        """
+        result: dict[int, int | None] = {}
+        for motor_id in self.ids:
+            try:
+                result[motor_id] = self._read(TORQUE_ENABLE, motor_id)
+            except StsBusError:
+                result[motor_id] = None
+        return result
+
     def recover(self, acceleration: int | None = None) -> None:
         """過負荷ラッチを解除して速度モードを再設定する。"""
         self.stop()

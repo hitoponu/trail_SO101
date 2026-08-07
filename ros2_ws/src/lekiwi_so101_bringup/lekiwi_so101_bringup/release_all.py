@@ -1,0 +1,220 @@
+"""異常終了したあとにホイールとアームを解放するコマンド。
+
+    ros2 run lekiwi_so101_bringup release_all
+    ros2 run lekiwi_so101_bringup release_all --yes --only wheels
+
+────────────────────────────────────────────────────────────────────────
+なぜこれが要るのか
+────────────────────────────────────────────────────────────────────────
+停止処理はすべて Python の ``finally`` にある。分岐しているのは
+「``finally`` に到達できるか」だけ:
+
+    経路                                   アーム        ホイール
+    Ctrl+C / SIGTERM / Python 例外         トルク OFF    ゼロ + トルク OFF
+    SIGKILL (docker kill / OOM / 強制削除) **ON のまま**  **最後の指令速度のまま**
+
+STS3215 には**コマンドウォッチドッグが無い**。SIGKILL でプロセスが消えても
+サーボは最後に受け取った Goal_Velocity を保持し続けるので、ホイールは
+物理的に回り続ける。アームは保持トルクが入ったまま凍る。
+
+ROS のノードは死んでいる前提なので、このコマンドは **ROS を一切使わず**
+シリアルポートを直接開く。
+
+────────────────────────────────────────────────────────────────────────
+★ アームはトルクを切ると落ちる
+────────────────────────────────────────────────────────────────────────
+凍ったアームを解放するのが目的なので、それが正しい挙動。**人が支えている
+前提**で、``--yes`` が無ければ確認を求める。
+
+────────────────────────────────────────────────────────────────────────
+★ ホイールとアームで処理が違う
+────────────────────────────────────────────────────────────────────────
+ホイール: ``stop()`` (Goal_Velocity=0) → ``disable_torque()``
+アーム  : ``disable_torque()`` **のみ**
+
+アームに ``stop()`` を使わない。``stop()`` が書く Goal_Velocity は、速度モード
+では速度指令だが、**位置モードでは速度上限**であって意味が違う。0 を書いたときの
+挙動がファームウェア依存になるので、トルクを切るだけにする。
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+from lekiwi_base_bringup.sts_bus import StsBus, StsBusError
+
+WHEEL_PORT = "/dev/lekiwi"
+WHEEL_IDS = [7, 8, 9]
+
+ARM_PORT = "/dev/so101_follower"
+ARM_IDS = [1, 2, 3, 4, 5, 6]
+
+BAUDRATE = 1_000_000
+
+
+class Outcome:
+    """1 本のバスに対する処理結果。"""
+
+    def __init__(self, label: str, port: str, ids: list[int]) -> None:
+        self.label = label
+        self.port = port
+        self.ids = ids
+        self.error: str | None = None
+        self.torque: dict[int, int | None] = {}
+
+    @property
+    def released(self) -> bool:
+        """全 ID の Torque_Enable が 0 だと**読み戻せた**ときだけ True。
+
+        ★ 判定の根拠は読み戻しだけ。`error` の有無では決めない。
+          - `disable_torque()` は ID ごとの失敗を握り潰すので、「呼べた」を
+            根拠にすると嘘の成功報告になる。読めなかった ID (None) も成功にしない。
+          - 逆に、途中で通信が切れて `error` が付いても、全 ID が 0 だと
+            読めているならハードウェアは実際に解放されている。
+            そこを失敗扱いにすると、解放済みの機体に対して人が
+            もう一度アームを落としに行くことになる。
+        """
+        if set(self.torque) != set(self.ids):
+            return False
+        return all(value == 0 for value in self.torque.values())
+
+    def report(self) -> None:
+        print(f"── {self.label} ({self.port}, ID {self.ids}) " + "─" * 20)
+        if self.error is not None:
+            print(f"   ★ {self.error}")
+        if not self.torque:
+            return
+        for motor_id in self.ids:
+            value = self.torque.get(motor_id)
+            if value is None:
+                print(f"   ID {motor_id}: ★ 読み出せない (配線・電源・ID を確認)")
+            elif value == 0:
+                print(f"   ID {motor_id}: OK  Torque_Enable=0")
+            else:
+                print(f"   ID {motor_id}: ★ Torque_Enable={value} のまま")
+
+
+def diagnose_port(port: str) -> str | None:
+    """ポートを開けない理由を人間向けに返す。開けそうなら None。"""
+    if not os.path.exists(port):
+        return (
+            f"{port} が存在しない。udev ルールが当たっているか、"
+            "コンテナに devices: で渡っているかを確認すること"
+        )
+    if not os.access(port, os.R_OK | os.W_OK):
+        return f"{port} に読み書き権限が無い (dialout グループの GID を確認)"
+    return None
+
+
+def release_bus(label: str, port: str, ids: list[int], *, zero_velocity: bool) -> Outcome:
+    """1 本のバスを解放する。失敗しても例外は投げず Outcome に載せる。"""
+    outcome = Outcome(label, port, ids)
+
+    reason = diagnose_port(port)
+    if reason is not None:
+        outcome.error = reason
+        return outcome
+
+    bus = StsBus(port, ids, baudrate=BAUDRATE)
+    try:
+        bus.connect()
+    except Exception as exc:  # noqa: BLE001
+        # ★ StsBusError だけでは足りない。scservo_sdk は pyserial の
+        #   SerialException をそのまま通すので、ポートがシリアルでない場合や
+        #   排他ロックされている場合に**トレースバックで死ぬ**。
+        #   これは異常終了からの復帰コマンドで、動かないときこそ
+        #   「何をすればいいか」を出さなければならない。握って助言に変える。
+        outcome.error = (
+            f"{type(exc).__name__}: {exc}\n"
+            "      ROS のノードがまだポートを掴んでいる可能性が高い。\n"
+            "      先にコンテナを止めてから実行すること:\n"
+            "        docker compose down"
+        )
+        return outcome
+
+    try:
+        if zero_velocity:
+            # ★ ホイールだけ。速度モードなので Goal_Velocity=0 が「止まれ」になる。
+            #   トルクを切る前にゼロを入れておかないと、切った瞬間まで回り続ける。
+            bus.stop()
+        bus.disable_torque()
+        outcome.torque = bus.read_torque_enable()
+    except Exception as exc:  # noqa: BLE001
+        # 途中で通信が死んでも、読めたぶんの Torque_Enable は報告する。
+        # torque が空なら released は False になるので、嘘の成功にはならない。
+        outcome.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        bus.close()
+    return outcome
+
+
+def confirm(assume_yes: bool) -> bool:
+    """アームが落ちることの確認。--yes が無く、対話端末も無ければ中止する。"""
+    if assume_yes:
+        return True
+    print("★ アームのトルクを切ります。支えが無ければ**その場で落ちます**。")
+    print("  低い姿勢にするか、人が支えてから続けること。")
+    if not sys.stdin.isatty():
+        print("  端末が対話的でないので中止しました。--yes を付けて実行してください。")
+        return False
+    try:
+        answer = input("  続けますか? [y/N] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in ("y", "yes")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="異常終了後にホイールとアームを解放する (ROS を使わない)",
+    )
+    parser.add_argument(
+        "--only",
+        choices=("both", "wheels", "arm"),
+        default="both",
+        help="既定は both。ホイールだけ止めたいなら wheels (アームは落ちない)",
+    )
+    parser.add_argument("--wheel-port", default=WHEEL_PORT)
+    parser.add_argument("--arm-port", default=ARM_PORT)
+    parser.add_argument(
+        "--yes", action="store_true", help="アームが落ちる確認をスキップする"
+    )
+    args = parser.parse_args()
+
+    do_wheels = args.only in ("both", "wheels")
+    do_arm = args.only in ("both", "arm")
+
+    if do_arm and not confirm(args.yes):
+        sys.exit(1)
+
+    outcomes: list[Outcome] = []
+    # ★ 順序が重要。走っているホイールを先に止める。アームの確認で手間取っている
+    #   間も機体は動き続けるので、ホイールを後回しにしない。
+    if do_wheels:
+        outcomes.append(
+            release_bus("ホイール", args.wheel_port, WHEEL_IDS, zero_velocity=True)
+        )
+    if do_arm:
+        outcomes.append(
+            release_bus("アーム", args.arm_port, ARM_IDS, zero_velocity=False)
+        )
+
+    print()
+    for outcome in outcomes:
+        outcome.report()
+    print()
+
+    # ★ 片方のポートが無くてももう片方は処理する。両方が揃わないと失敗、では
+    #   「アームだけ繋がった机上の切り分け」ができない。
+    failed = [o for o in outcomes if not o.released]
+    if failed:
+        print("★ 解放を確認できなかったものがあります: "
+              + ", ".join(o.label for o in failed))
+        sys.exit(1)
+    print("すべて解放を確認しました (Torque_Enable=0 を読み戻し済み)")
+
+
+if __name__ == "__main__":
+    main()

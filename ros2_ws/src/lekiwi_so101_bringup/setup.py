@@ -24,4 +24,10 @@ setup(
     description="LeKiwi base with an SO-101 arm: composition only.",
     license="Apache-2.0",
     tests_require=["pytest"],
+    entry_points={
+        "console_scripts": [
+            # 異常終了 (SIGKILL) 後にホイールとアームを解放する。ROS を使わない。
+            "release_all = lekiwi_so101_bringup.release_all:main",
+        ],
+    },
 )
