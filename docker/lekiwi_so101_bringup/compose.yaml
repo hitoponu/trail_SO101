@@ -121,6 +121,17 @@ services:
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
       ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
       ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
+      # ★ 手首カメラの取付姿勢。実測したら .env に書く。
+      #   結合 URDF の既定値としてここから読まれる。
+      WRIST_CAMERA: ${WRIST_CAMERA:-true}
+      WRIST_CAMERA_NAME: ${WRIST_CAMERA_NAME:-wrist_camera}
+      WRIST_CAMERA_PARENT: ${WRIST_CAMERA_PARENT:-gripper_link}
+      WRIST_CAMERA_X: ${WRIST_CAMERA_X:-0.0}
+      WRIST_CAMERA_Y: ${WRIST_CAMERA_Y:-0.0}
+      WRIST_CAMERA_Z: ${WRIST_CAMERA_Z:-0.0}
+      WRIST_CAMERA_ROLL: ${WRIST_CAMERA_ROLL:-0.0}
+      WRIST_CAMERA_PITCH: ${WRIST_CAMERA_PITCH:-0.0}
+      WRIST_CAMERA_YAW: ${WRIST_CAMERA_YAW:-0.0}
     devices:
       - ${SO101_DEVICE:-/dev/so101_follower}:${SO101_DEVICE:-/dev/so101_follower}
     group_add:
@@ -149,5 +160,52 @@ services:
     restart: "no"
     stop_signal: SIGINT
     stop_grace_period: 20s
+    stdin_open: true
+    tty: true
+
+  # 手首カメラ RealSense D435i。★ アームの gripper_link に載せる。
+  #
+  # ★ 環境固定カメラと違い、外部キャリブレーションは要らない。
+  #   取り付けは結合 URDF が arm_gripper_link -> wrist_camera_mount_link
+  #   -> wrist_camera_link を出すので、map -> camera は TF からタダで出る。
+  #
+  # ★ ROS_DOMAIN_ID をこのスタックに揃えること。docker/realsense_ros2 の
+  #   単体構成は既定 0 で、ドメインが違うと RViz が点群を購読できない。
+  #
+  # ★ コンテナ名は単体スタックの realsense-d435i と別にしてあるが、
+  #   **同じ USB デバイスを奪い合う**ので Makefile の guard は両方を見る。
+  realsense:
+    build:
+      context: ../..
+      dockerfile: docker/realsense_ros2/Dockerfile
+    image: local/realsense-d435i-ros2:jazzy
+    container_name: lekiwi-wrist-camera
+    init: true
+    network_mode: host
+    ipc: host
+    # RealSense は USB の再接続でノード番号が変わるため devices: 指定が使えない。
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+      ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
+    command:
+      - ros2
+      - launch
+      - realsense_bringup
+      - d435i.launch.py
+      # ★ camera_name は TF のフレーム名にも効く (wrist_camera_link ...)。
+      #   結合 URDF の wrist_camera_name と必ず一致させること。
+      - camera_name:=${WRIST_CAMERA_NAME:-wrist_camera}
+      - camera_namespace:=${WRIST_CAMERA_NAME:-wrist_camera}
+      - enable_pointcloud:=true
+      - depth_fps:=${WRIST_CAMERA_FPS:-6}
+      - color_fps:=${WRIST_CAMERA_FPS:-6}
+      - decimation:=${WRIST_CAMERA_DECIMATION:-2}
+      # RViz はアームコンテナが唯一持つ。
+      - start_rviz:=false
+    restart: unless-stopped
     stdin_open: true
     tty: true

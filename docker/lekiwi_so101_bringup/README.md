@@ -138,6 +138,8 @@ N="docker exec lekiwi-nav-mock /entrypoint.sh"        # ベース側（モック
 | `/so101/reach_markers` | `visualization_msgs/Marker` | リーチ → | 目標球（緑 = 受理 / 赤 = 棄却） |
 | `/so101/hardware_states` | `sensor_msgs/JointState` | ブリッジ → | 内部。ros2_control ↔ LeRobot |
 | `/so101/hardware_commands` | `sensor_msgs/JointState` | → ブリッジ | 内部 |
+| `/wrist_camera/wrist_camera/depth/color/points` | `sensor_msgs/PointCloud2` | カメラ → | 手首カメラの点群。`frame_id` は `wrist_camera_depth_optical_frame`。★ **BEST_EFFORT** |
+| `/wrist_camera/wrist_camera/color/image_raw` | `sensor_msgs/Image` | カメラ → | カラー画像 |
 
 ### アクション
 
@@ -280,7 +282,35 @@ $E ros2 topic pub --once -w 1 /clicked_point geometry_msgs/msg/PointStamped \
 $E ros2 service call /so101/stow std_srvs/srv/Trigger '{}'
 ```
 
-### 6. 故障を意図的に起こして確認する
+### 6. 手首カメラ
+
+**点群を `map` 上に置くのに較正は要らない。** カメラは URDF で
+`arm_gripper_link` に剛体固定されているので、`map → camera` は TF から出る。
+RViz の Fixed Frame を `map` にして "Wrist Camera Cloud" を有効にすれば、
+点群は `map` 上の正しい位置に描画される。
+
+```bash
+$E ros2 run tf2_ros tf2_echo map wrist_camera_depth_optical_frame
+$E ros2 topic hz /wrist_camera/wrist_camera/depth/color/points
+$E ros2 topic bw /wrist_camera/wrist_camera/depth/color/points
+
+# ★ フレーム名が camera_link でなく wrist_camera_link になっているか
+#   (camera_name がパラメータとして効いているかの検査)
+$E ros2 run tf2_ros tf2_echo wrist_camera_link wrist_camera_depth_optical_frame
+
+# ★ 腕を動かすとカメラ TF が追従することの確認
+$E ros2 run tf2_ros tf2_echo map wrist_camera_link      # 動かす前後で変わる
+```
+
+> ★ **カメラが動くので、点群を使う側は TF を「メッセージのタイムスタンプ」で
+> 引くこと。**最新 TF で解決すると腕の動作中に点群がずれる。RViz は正しく扱う。
+>
+> ★ **移動中の点群は信用しない。**深度は動くと荒れる。静止して撮ること。
+>
+> ★ D435i の最短測距は約 0.1〜0.2m。**手首カメラは対象に近づくので、
+> リーチ目標の距離では測距範囲を下回る可能性がある**（実機で要確認）。
+
+### 7. 故障を意図的に起こして確認する
 
 ```bash
 # slam を止める -> REJECTED_STALE_TF（古い座標で黙って解かない）

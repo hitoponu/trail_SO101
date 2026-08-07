@@ -46,6 +46,22 @@
   <xacro:arg name="arm_mount_pitch" default="0.0"/>
   <xacro:arg name="arm_mount_yaw" default="0.0"/>
 
+  <!-- ★ 手首カメラ (RealSense D435i)。
+       取り付けは arm_gripper_link。wrist_roll と一緒に回るので、
+       リーチのソルバが wrist_roll を凍結する以上ロール角は一定になる。
+
+       ★ 取付姿勢は未実測。arm_mount / laser と同じ TBD 流儀で、
+         確定するまでマゼンタのマーカーで見えるようにしてある。 -->
+  <xacro:arg name="wrist_camera" default="true"/>
+  <xacro:arg name="wrist_camera_name" default="wrist_camera"/>
+  <xacro:arg name="wrist_camera_parent" default="gripper_link"/>
+  <xacro:arg name="wrist_camera_x" default="0.0"/>
+  <xacro:arg name="wrist_camera_y" default="0.0"/>
+  <xacro:arg name="wrist_camera_z" default="0.0"/>
+  <xacro:arg name="wrist_camera_roll" default="0.0"/>
+  <xacro:arg name="wrist_camera_pitch" default="0.0"/>
+  <xacro:arg name="wrist_camera_yaw" default="0.0"/>
+
   <xacro:include filename="$(find lekiwi_description)/urdf/lekiwi_base.macro.xacro"/>
   <xacro:lekiwi_base prefix=""
                      use_mesh="$(arg use_mesh)"
@@ -62,6 +78,62 @@
                    roll="$(arg arm_mount_roll)"
                    pitch="$(arg arm_mount_pitch)"
                    yaw="$(arg arm_mount_yaw)"/>
+
+  <!-- ================= 手首カメラ ================= -->
+  <!--
+    ★ ここが「点群を map 上に置く」ための全て。外部キャリブレーションは要らない。
+
+      map -> ... -> ${prefix}gripper_link
+                 -> wrist_camera_mount_link      (この URDF)
+                 -> wrist_camera_link            (この URDF)
+                 -> wrist_camera_depth_optical_frame  (realsense2_camera が /tf_static へ)
+
+    ★ wrist_camera_link を**この URDF 側で宣言し、mount の子にする**のが要点。
+      realsense2_camera は <camera_name>_link を自分のサブツリーの根として
+      <name>_link -> <name>_depth_frame などを出すが、<name>_link を**子にする
+      TF は出さない**。したがって親をこちらが与えても二重定義にならない。
+      lekiwi_description の laser_link と同じパターン。
+
+    ★ カメラのフレームにアームの接頭辞 (${prefix}) は付けない。
+      アーム側のリンク名は上流マクロが prefix を付けるが、カメラのフレーム名は
+      realsense2_camera の camera_name パラメータから作られるため。
+      launch の camera_name と wrist_camera_name を必ず一致させること。
+  -->
+  <xacro:if value="$(arg wrist_camera)">
+    <joint name="$(arg wrist_camera_name)_mount_joint" type="fixed">
+      <origin xyz="$(arg wrist_camera_x) $(arg wrist_camera_y) $(arg wrist_camera_z)"
+              rpy="$(arg wrist_camera_roll) $(arg wrist_camera_pitch) $(arg wrist_camera_yaw)"/>
+      <parent link="$(arg prefix)$(arg wrist_camera_parent)"/>
+      <child link="$(arg wrist_camera_name)_mount_link"/>
+    </joint>
+
+    <!-- TBD マーカー。RViz で取付位置が未確定だと分かるようにする。 -->
+    <link name="$(arg wrist_camera_name)_mount_link">
+      <visual>
+        <geometry>
+          <box size="0.02 0.02 0.004"/>
+        </geometry>
+        <material name="lekiwi_tbd"/>
+      </visual>
+    </link>
+
+    <!-- D435i の筐体 (90 x 25 x 25 mm)。camera_link は筐体の中心ではなく
+         左赤外イメージャ基準だが、見た目の目安として置く。 -->
+    <joint name="$(arg wrist_camera_name)_link_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="$(arg wrist_camera_name)_mount_link"/>
+      <child link="$(arg wrist_camera_name)_link"/>
+    </joint>
+
+    <link name="$(arg wrist_camera_name)_link">
+      <visual>
+        <geometry>
+          <box size="0.025 0.090 0.025"/>
+        </geometry>
+        <material name="lekiwi_tbd"/>
+      </visual>
+    </link>
+  </xacro:if>
 
   <xacro:include filename="$(arg ros2_control_file)"/>
   <xacro:ros2_control prefix="$(arg prefix)"

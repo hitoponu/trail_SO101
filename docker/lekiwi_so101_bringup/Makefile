@@ -33,8 +33,8 @@ MOCK_START_RVIZ ?= false
 #   いちばん有力な二重 publisher は「モック構成のアームコンテナ」なので
 #   必ず入れること (以前これが抜けていた)。
 #   rplidar-a1 はこのスタック自身が使うので対象外。
-CONFLICTS_FOR_REACH := so101-follower lekiwi-base lekiwi-nav-mock lekiwi-so101-arm-mock
-CONFLICTS_FOR_MOCK  := so101-follower lekiwi-base lekiwi-nav lekiwi-so101-arm
+CONFLICTS_FOR_REACH := so101-follower lekiwi-base lekiwi-nav-mock lekiwi-so101-arm-mock realsense-d435i
+CONFLICTS_FOR_MOCK  := so101-follower lekiwi-base lekiwi-nav lekiwi-so101-arm realsense-d435i
 
 .PHONY: build bootstrap mock reach shell stow save-map check down logs guard guard-mock
 
@@ -119,6 +119,10 @@ check:
 	docker exec $$C $(E) ros2 topic info /joint_states | grep 'Publisher count'; \
 	echo "--- controllers (期待: active 3 つ) ---"; \
 	docker exec $$C $(E) ros2 control list_controllers; \
+	echo "--- map -> wrist_camera_depth_optical_frame ---"; \
+	docker exec $$C $(E) timeout 5 \
+	  ros2 run tf2_ros tf2_echo map wrist_camera_depth_optical_frame 2>/dev/null \
+	  | grep -a Translation | head -1 || echo "  (手首カメラ TF 無し)"; \
 	echo "--- map -> arm_gripper_frame_link ---"; \
 	docker exec $$C $(E) timeout 5 \
 	  ros2 run tf2_ros tf2_echo map arm_gripper_frame_link 2>/dev/null \

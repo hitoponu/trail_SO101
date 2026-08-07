@@ -118,6 +118,31 @@ Visualization Manager:
         Durability Policy: Volatile
         Reliability Policy: Reliable
       Color: 25; 255; 255
+    # ---- 手首カメラ ----
+    # ★ Fixed Frame が map なので、この点群は自動的に map 上の正しい位置に出る。
+    #   URDF が arm_gripper_link -> wrist_camera_link を繋いでいるため。
+    # ★ 既定は無効。realsense2_camera は購読者ゼロなら点群の生成自体を
+    #   スキップするので、切っている間はコストがゼロ。
+    # ★ Style を Points にしないこと。1px になり Publish Point で狙えない。
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Wrist Camera Cloud
+      Enabled: false
+      Topic:
+        Value: /wrist_camera/wrist_camera/depth/color/points
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Style: Flat Squares
+      Size (m): 0.005
+      Decay Time: 0
+      Color Transformer: RGB8
+      Selectable: true
+    - Class: rviz_default_plugins/Axes
+      Name: Wrist Camera
+      Enabled: true
+      Reference Frame: wrist_camera_link
+      Length: 0.1
+      Radius: 0.005
     # リーチ目標。緑 = 受理、赤 = 棄却。
     - Class: rviz_default_plugins/Marker
       Name: Reach Target

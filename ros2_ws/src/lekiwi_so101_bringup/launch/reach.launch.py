@@ -26,6 +26,7 @@
   (CLAUDE.md の「RViz に別のロボットが出る」症状)。
 """
 
+import os
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -54,6 +55,10 @@ def generate_launch_description():
     reach_params_file = LaunchConfiguration("reach_params_file")
 
     mount_keys = ("x", "y", "z", "roll", "pitch", "yaw")
+    wrist_camera = LaunchConfiguration("wrist_camera")
+    wrist_camera_name = LaunchConfiguration("wrist_camera_name")
+    wrist_camera_parent = LaunchConfiguration("wrist_camera_parent")
+    mock_wrist_camera_optical = LaunchConfiguration("mock_wrist_camera_optical")
 
     robot_description = ParameterValue(
         Command(
@@ -72,6 +77,19 @@ def generate_launch_description():
                 for token in (
                     f" arm_mount_{key}:=",
                     LaunchConfiguration(f"arm_mount_{key}"),
+                )
+            ]
+            + [
+                " wrist_camera:=", wrist_camera,
+                " wrist_camera_name:=", wrist_camera_name,
+                " wrist_camera_parent:=", wrist_camera_parent,
+            ]
+            + [
+                token
+                for key in mount_keys
+                for token in (
+                    f" wrist_camera_{key}:=",
+                    LaunchConfiguration(f"wrist_camera_{key}"),
                 )
             ]
         ),
@@ -111,6 +129,32 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "rviz_config", default_value=str(share / "rviz" / "reach.rviz")
             ),
+            # ★ 手首カメラ (RealSense)。取付は arm_gripper_link。
+            #   点群を map 上に置くのに必要なのは URDF のこの繋ぎだけで、
+            #   外部キャリブレーションは要らない (カメラが剛体固定されているため)。
+            #   既定値は環境変数から読む (.env -> compose の environment -> ここ)。
+            DeclareLaunchArgument(
+                "wrist_camera",
+                default_value=os.environ.get("WRIST_CAMERA", "true"),
+                description="URDF に手首カメラのリンクを生やすか"),
+            DeclareLaunchArgument(
+                "wrist_camera_name",
+                default_value=os.environ.get("WRIST_CAMERA_NAME", "wrist_camera"),
+                description="★ realsense の camera_name と必ず一致させること"),
+            DeclareLaunchArgument(
+                "wrist_camera_parent",
+                default_value=os.environ.get("WRIST_CAMERA_PARENT", "gripper_link"),
+                description="接頭辞なしで書く (joint_prefix が前置される)"),
+            # ★ 実機では realsense2_camera がこの TF を /tf_static へ出すので
+            #   起動しないこと (二重定義になる)。カメラ実機が無い Mac で
+            #   map -> ..._depth_optical_frame の疎通と軸の向きを検証するため。
+            DeclareLaunchArgument(
+                "mock_wrist_camera_optical", default_value="false"),
+            # ★ 取付姿勢は未実測。RViz でマゼンタのマーカーとして見える。
+            *(DeclareLaunchArgument(
+                f"wrist_camera_{key}",
+                default_value=os.environ.get(f"WRIST_CAMERA_{key.upper()}", "0.0"))
+              for key in mount_keys),
             # ★ 実測待ち。arm_mount_link から見たアーム基部の姿勢。
             #   arm_mount_link 自体 (base_link から 0.08,-0.04,0.057) も CAD 由来で未実測。
             #   docs/agent/request.md の手順 0 / 3 で確定させる。
@@ -156,6 +200,22 @@ def generate_launch_description():
                         ],
                     )
                 ]
+            ),
+            # ★ Mac 検証用の模擬光学フレーム。REP-103 のボディ座標 (x前 y左 z上)
+            #   から光学座標 (x右 y下 z前) への変換は rpy = (-pi/2, 0, -pi/2)。
+            #   realsense2_camera が出すものと同じ。
+            Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="wrist_camera_optical_tf_mock",
+                output="screen",
+                condition=IfCondition(mock_wrist_camera_optical),
+                arguments=[
+                    "--x", "0", "--y", "0", "--z", "0",
+                    "--roll", "-1.5707963", "--pitch", "0", "--yaw", "-1.5707963",
+                    "--frame-id", [wrist_camera_name, "_link"],
+                    "--child-frame-id", [wrist_camera_name, "_depth_optical_frame"],
+                ],
             ),
             # ---- リーチ ----
             Node(
