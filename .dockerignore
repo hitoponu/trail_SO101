@@ -29,6 +29,8 @@ docker/lekiwi_bringup/.env
 docker/lekiwi_bringup/README.md
 docker/lekiwi_so101_bringup/.env
 docker/lekiwi_so101_bringup/README.md
+docker/robot/.env
+docker/robot/README.md
 
 # ★ ワークスペースのビルド成果物と上流クローン。
 #   マウント方式へ移行してホスト側に生成されるようになったが、
@@ -42,3 +44,4 @@ ros2_ws/build
 ros2_ws/install
 ros2_ws/log
 ros2_ws/src/ros2_so_arm
+ros2_ws/src/sllidar_ros2

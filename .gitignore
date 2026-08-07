@@ -16,9 +16,10 @@ wheels/
 # images
 captured_images/
 outputs/
-# vcs import で Docker ビルド中に展開する上流リポジトリ (ros2_ws/so101_upstream.repos)。
+# vcs import で bootstrap.sh が展開する上流リポジトリ (ros2_ws/so101_upstream.repos)。
 # メッシュが SO101/assets と完全に同一なので追跡しない。
 ros2_ws/src/ros2_so_arm/
+ros2_ws/src/sllidar_ros2/
 
 # SLAM で保存した地図 (docker/lekiwi_bringup の MAP_DIR 既定値)
 maps/

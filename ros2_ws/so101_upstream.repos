@@ -1,5 +1,4 @@
-# SO-101 用に取り込む上流リポジトリ。docker/so101_ros2/Dockerfile が
-# ビルド中に `vcs import src < この定義` で展開する。
+# 取り込む上流リポジトリ。bootstrap.sh が `vcs import src < この定義` で展開する。
 #
 # なぜ vendored コピー (git にコミット) にしないか:
 #   so_arm101_description/meshes/*.stl は、既にこのリポジトリで追跡している
@@ -16,3 +15,11 @@ repositories:
     type: git
     url: https://github.com/ros-physical-ai/ros2_so_arm.git
     version: e166df9d51f43b24da9b99047c6c51c306bda74f
+  # RPLIDAR A1 のドライバ。以前は docker/rplidar_ros2/Dockerfile が
+  # `git clone --branch main --depth 1` で取っていて **未固定** だった。
+  # 1 イメージへの統合にあわせてここへ移し、SHA で固定する。
+  # 2026-08-07 時点の main の先端。
+  sllidar_ros2:
+    type: git
+    url: https://github.com/Slamtec/sllidar_ros2.git
+    version: 34300099fadfc772965962dec837bf436706188f

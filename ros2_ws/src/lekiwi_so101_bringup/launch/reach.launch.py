@@ -8,14 +8,19 @@
   4. RViz (システム全体でこれ 1 つだけ)
 
 ★ ベース側 (base_driver / scan_filter / slam_toolbox / Nav2) はここでは起動しない。
-  それらは lekiwi_base_bringup と nav2/slam_toolbox に依存しており、
-  このイメージには入っていない (アームのイメージにはメッシュと LeRobot が入る代わりに
-  ベース側の依存は入れていない)。ベース側は別コンテナで
+
+  ★ **ふだんは robot.launch.py を使うこと。** あちらがこの launch を include した
+    うえでベースとカメラも起動するので、ロボット全体が 1 プロセスで上がる
+    (docker/robot の統合イメージには nav2 も lekiwi_base_bringup も入っている)。
+
+  この launch がアーム側だけなのは、4 コンテナ構成 (docker/lekiwi_so101_bringup)
+  のアームのイメージにベース側の依存が入っていないため。その構成ではベースを
+  別コンテナで
 
       ros2 launch lekiwi_base_bringup nav.launch.py \
         start_robot_state_publisher:=false start_rviz:=false
 
-  として起動すること。docker/lekiwi_so101_bringup/compose.yaml がそうしている。
+  として起動する。docker/lekiwi_so101_bringup/compose.yaml がそうしている。
 
 ★ なぜ RSP をこちらが持つのか
   結合 URDF は lekiwi_description と so_arm101_description の両方を必要とし、
