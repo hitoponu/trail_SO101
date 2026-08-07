@@ -6,6 +6,28 @@
 - LIDARによるSLAM&Navigation
 - `map`座標系上の点へのアームのリーチ
 
+## 構成
+
+```
+        map (slam_toolbox)
+         └ odom (base_driver のオドメトリ積分)
+            └ base_footprint → base_link
+                               ├ laser_link      ← RPLIDAR
+                               └ arm_mount_link
+                                  └ arm_base_link … arm_gripper_link
+                                       ├ arm_gripper_frame_link  ← リーチの手先
+                                       └ wrist_camera_mount_link
+                                          └ wrist_camera_link  ← 手首カメラ
+```
+
+| コンテナ | イメージ | 役割 |
+| --- | --- | --- |
+| `lekiwi-nav` | `lekiwi-base-ros2` | base_driver, scan_filter, slam_toolbox, Nav2 |
+| `rplidar-a1` | `rplidar-a1-ros2` | sllidar_node → `/scan` |
+| `lekiwi-so101-arm` | `so101-ros2` | **robot_state_publisher（結合、唯一）**, LeRobot ブリッジ, ros2_control, リーチノード, **RViz（唯一）** |
+| `lekiwi-wrist-camera` | `realsense-d435i-ros2` | 手首カメラ。点群 → `wrist_camera_depth_optical_frame` |
+
+
 ## 環境構築
 
 ```bash
@@ -38,6 +60,30 @@ docker exec -it lekiwi-so101-arm bash
 make stow     # 1. アームを低く畳む
 make down     # 2. bridgeをshutdownしてトルクOFF後、コンテナを停止
 ```
+
+## インターフェース一覧
+
+すべて**モックで実在を確認した**もの（`ros2 topic type` / `action list -t` / `service list -t`）。
+コンテナ内で叩くので、以下は共通の前置きを使う。
+
+```bash
+E="docker exec lekiwi-so101-arm /entrypoint.sh"       # アーム側（実機）
+N="docker exec lekiwi-nav /entrypoint.sh"             # ベース側（実機）
+
+E="docker exec lekiwi-so101-arm-mock /entrypoint.sh"  # アーム側（モック）
+N="docker exec lekiwi-nav-mock /entrypoint.sh"        # ベース側（モック）
+```
+
+> ★ **`/entrypoint.sh` の前置は必須。** `docker exec` は ENTRYPOINT を通らないので、
+> 付けないと `ros2: executable file not found in $PATH` になる。
+>
+> ★ **`nav2_msgs` はベースコンテナにしか入っていない。**
+> Nav2 の**アクション**（`/navigate_to_pose` など）は `$N` で叩くこと。
+> `$E` で叩くと `The passed action type is invalid` になる（型を解決できないため）。
+> トピック（`/goal_pose` は `geometry_msgs`）はどちらからでも叩ける。
+>
+> ★ **起動直後は DDS の discovery が終わっておらず、`ros2 topic list` や
+> `action list` に一部しか出ない。** 30 秒ほど待つか `make check` を使うこと。
 
 ### トピック
 
@@ -160,8 +206,9 @@ $E ros2 topic pub --once -w 1 /initialpose geometry_msgs/msg/PoseWithCovarianceS
   '{header: {frame_id: map}, pose: {pose: {position: {x: 0.0, y: 0.0}, orientation: {w: 1.0}}}}'
 ```
 
-> ★ **SLAM 構成（`make reach`）では `/initialpose` の購読者が居ない**（amcl が動いていない）。
-> `-w 1` は購読者を待つので**そのまま固まる**。保存地図構成（`make reach-with-map`）専用。
+> ★ **`make reach` は SLAM 構成なので `/initialpose` の購読者が居ない**（amcl が
+> 動いていない）。`-w 1` は購読者を待つので**そのまま固まる**。
+> 保存地図 + amcl の構成にしたときだけ使うこと。
 
 ### 4. アーム（★ 🔴 実際に動く。人が立ち会うこと）
 
@@ -299,10 +346,11 @@ $E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped 
 | --- | --- |
 | `laser_link` の位置 | **実測済み (0.10, 0, 0.03)、yaw = −7°**（2026-08-07） |
 | `arm_mount_link` の位置と **yaw** | **実測済み (0.08, 0.00, 0.057) rpy 0**（2026-08-07）。★ CAD の y=−0.04 は誤りで、実測は **y=0** だった |
-| `joint_limit_overrides` | **空。★ 実測で y=0 が確定した結果、`laser_link` (0.10, 0) と `arm_mount_link` (0.08, 0) の xy 距離は 44mm ではなく **20mm** しかない。**当初の想定より近い。**無通電でアームを手で振り、干渉する角度を調べてから埋めること |
+| `joint_limit_overrides` | **空。** ★ 実測で y=0 が確定した結果、`laser_link` (0.10, 0) と `arm_mount_link` (0.08, 0) の xy 距離は 44mm ではなく **20mm** しかない（当初の想定より近い）。無通電でアームを手で振り、干渉する角度を調べてから埋めること |
 | `stow_positions` | 実測値 `[0.0322214631, -1.7951958021, 1.7422605412, -1.7721804713, 1.3709465377]`（pan, lift, elbow, wrist_flex, wrist_roll）。グリッパは `0.0363150868`。**初回は必ず無通電で手を添え、干渉しないことを確かめること** |
 
-手順は `docs/agent/request.md` にある。
+実機での測定手順は [`docs/wrist_camera.md`](../../docs/wrist_camera.md)（手首カメラ）と
+[`docs/tf_reliability.md`](../../docs/tf_reliability.md)（どの TF を疑うか）にある。
 
 ## 故障したときに何が起きるか
 
@@ -336,48 +384,3 @@ $E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped 
 - **`nav2.yaml` の `robot_radius: 0.17` は収納状態の前提。** 走行前に stow すること
 
 
-## 構成
-
-```
-        map (slam_toolbox)
-         └ odom (base_driver のオドメトリ積分)
-            └ base_footprint → base_link
-                               ├ laser_link      ← RPLIDAR
-                               └ arm_mount_link
-                                  └ arm_base_link … arm_gripper_link
-                                       ├ arm_gripper_frame_link  ← リーチの手先
-                                       └ wrist_camera_mount_link
-                                          └ wrist_camera_link  ← 手首カメラ
-```
-
-| コンテナ | イメージ | 役割 |
-| --- | --- | --- |
-| `lekiwi-nav` | `lekiwi-base-ros2` | base_driver, scan_filter, slam_toolbox, Nav2 |
-| `rplidar-a1` | `rplidar-a1-ros2` | sllidar_node → `/scan` |
-| `lekiwi-so101-arm` | `so101-ros2` | **robot_state_publisher（結合、唯一）**, LeRobot ブリッジ, ros2_control, リーチノード, **RViz（唯一）** |
-| `lekiwi-wrist-camera` | `realsense-d435i-ros2` | 手首カメラ。点群 → `wrist_camera_depth_optical_frame` |
-
-
-## インターフェース一覧
-
-すべて**モックで実在を確認した**もの（`ros2 topic type` / `action list -t` / `service list -t`）。
-コンテナ内で叩くので、以下は共通の前置きを使う。
-
-```bash
-E="docker exec lekiwi-so101-arm /entrypoint.sh"       # アーム側（実機）
-N="docker exec lekiwi-nav /entrypoint.sh"             # ベース側（実機）
-
-E="docker exec lekiwi-so101-arm-mock /entrypoint.sh"  # アーム側（モック）
-N="docker exec lekiwi-nav-mock /entrypoint.sh"        # ベース側（モック）
-```
-
-> ★ **`/entrypoint.sh` の前置は必須。** `docker exec` は ENTRYPOINT を通らないので、
-> 付けないと `ros2: executable file not found in $PATH` になる。
->
-> ★ **`nav2_msgs` はベースコンテナにしか入っていない。**
-> Nav2 の**アクション**（`/navigate_to_pose` など）は `$N` で叩くこと。
-> `$E` で叩くと `The passed action type is invalid` になる（型を解決できないため）。
-> トピック（`/goal_pose` は `geometry_msgs`）はどちらからでも叩ける。
->
-> ★ **起動直後は DDS の discovery が終わっておらず、`ros2 topic list` や
-> `action list` に一部しか出ない。** 30 秒ほど待つか `make check` を使うこと。
