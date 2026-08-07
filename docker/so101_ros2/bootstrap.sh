@@ -22,15 +22,24 @@ else
   echo "   (更新するには src/ros2_so_arm を消してから再実行)"
 fi
 
-# Pythonパッケージのデータファイルを削除した後は、symlink-installの
-# 旧成果物が残っているとsetuptoolsが存在しないファイルをコピーしようと
-# する。該当パッケージの生成物だけを消して再生成する。
-if [ -L build/so101_bringup/config/so101_offsets.xacro ] \
-    && [ ! -e build/so101_bringup/config/so101_offsets.xacro ]; then
-  echo
-  echo "== 古い so101_bringup の生成物を再生成します =="
-  rm -rf build/so101_bringup install/so101_bringup
-fi
+# --symlink-install の成果物には src を指すシンボリックリンクが残る。
+# データファイルを消したりブランチを切り替えたりすると、リンク先が消えて
+# 「壊れたリンク」になり、setuptools が存在しないファイルをコピーしようとして
+#   error: can't copy '...': doesn't exist or not a regular file
+# で失敗する。該当パッケージの生成物だけを消して作り直す。
+#
+# ★ ブランチ切り替えで頻繁に起きる (例: feat/env-camera にしか無い
+#   env_camera.launch.py のリンクが build に残ったまま別ブランチへ戻る)。
+#   パッケージ名を決め打ちせず、壊れたリンクを持つものを全部拾う。
+for pkg_build in build/*/; do
+  pkg="$(basename "$pkg_build")"
+  if find "$pkg_build" -xtype l -print -quit 2>/dev/null | grep -q .; then
+    echo
+    echo "== $pkg に壊れたシンボリックリンクがあるので作り直します =="
+    find "$pkg_build" -xtype l -printf '   %p -> %l\n' 2>/dev/null | head -5
+    rm -rf "build/$pkg" "install/$pkg"
+  fi
+done
 
 echo
 echo "== ビルドします =="

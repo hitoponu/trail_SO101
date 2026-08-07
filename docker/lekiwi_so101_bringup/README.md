@@ -92,6 +92,210 @@ make stow     # 1. アームを低く畳む
 make down     # 2. bridgeをshutdownしてトルクOFF後、コンテナを停止
 ```
 
+## インターフェース一覧
+
+すべて**モックで実在を確認した**もの（`ros2 topic type` / `action list -t` / `service list -t`）。
+コンテナ内で叩くので、以下は共通の前置きを使う。
+
+```bash
+E="docker exec lekiwi-so101-arm /entrypoint.sh"       # アーム側（実機）
+N="docker exec lekiwi-nav /entrypoint.sh"             # ベース側（実機）
+
+E="docker exec lekiwi-so101-arm-mock /entrypoint.sh"  # アーム側（モック）
+N="docker exec lekiwi-nav-mock /entrypoint.sh"        # ベース側（モック）
+```
+
+> ★ **`/entrypoint.sh` の前置は必須。** `docker exec` は ENTRYPOINT を通らないので、
+> 付けないと `ros2: executable file not found in $PATH` になる。
+>
+> ★ **`nav2_msgs` はベースコンテナにしか入っていない。**
+> Nav2 の**アクション**（`/navigate_to_pose` など）は `$N` で叩くこと。
+> `$E` で叩くと `The passed action type is invalid` になる（型を解決できないため）。
+> トピック（`/goal_pose` は `geometry_msgs`）はどちらからでも叩ける。
+>
+> ★ **起動直後は DDS の discovery が終わっておらず、`ros2 topic list` や
+> `action list` に一部しか出ない。** 30 秒ほど待つか `make check` を使うこと。
+
+### トピック
+
+| トピック | 型 | 向き | 用途 |
+| --- | --- | --- | --- |
+| `/cmd_vel` | `geometry_msgs/Twist` | → ベース | 速度指令。**Nav2 の collision_monitor より下流**なので手打ちには安全機構が効かない |
+| `/odom` | `nav_msgs/Odometry` | ベース → | ★ **指令値の積分**。スリップも外乱もアームの反動も現れない |
+| `/scan` | `sensor_msgs/LaserScan` | LiDAR → | 生スキャン |
+| `/scan_filtered` | `sensor_msgs/LaserScan` | scan_filter → | 前方 ±60° に絞ったもの。**slam と costmap はこちらを見る** |
+| `/map` | `nav_msgs/OccupancyGrid` | slam → | TRANSIENT_LOCAL |
+| `/goal_pose` | `geometry_msgs/PoseStamped` | → Nav2 | ナビゲーション目標。RViz の **"2D Goal Pose"** |
+| `/initialpose` | `geometry_msgs/PoseWithCovarianceStamped` | → amcl | 初期姿勢。**保存地図構成でのみ存在**（SLAM 構成には無い） |
+| `/plan` | `nav_msgs/Path` | Nav2 → | 大域経路 |
+| `/optimal_trajectory` | `nav_msgs/Path` | MPPI → | 局所軌道。★ 他構成でよくある `/local_plan` は**この構成には無い** |
+| `/local_costmap/published_footprint` | `geometry_msgs/PolygonStamped` | Nav2 → | ★ `robot_radius: 0.17` は**アームを畳んだ前提** |
+| `/joint_states` | `sensor_msgs/JointState` | → RSP | ★ **publisher は 2 つ**（車輪 3 関節 / アーム 6 関節）。購読側は蓄積が要る |
+| `/robot_description` | `std_msgs/String` | RSP → | ★ **publisher は 1 つでなければならない**（TRANSIENT_LOCAL / depth 1） |
+| `/so101/reach_target` | `geometry_msgs/PoseStamped` | → リーチ | リーチ目標（`frame_id: map`） |
+| `/clicked_point` | `geometry_msgs/PointStamped` | → リーチ | RViz の **"Publish Point"**。★ 型が違うので "2D Goal Pose" とは別物 |
+| `/so101/reach_status` | `std_msgs/String` | リーチ → | 判定結果 1 行（下の表） |
+| `/so101/reach_markers` | `visualization_msgs/Marker` | リーチ → | 目標球（緑 = 受理 / 赤 = 棄却） |
+| `/so101/hardware_states` | `sensor_msgs/JointState` | ブリッジ → | 内部。ros2_control ↔ LeRobot |
+| `/so101/hardware_commands` | `sensor_msgs/JointState` | → ブリッジ | 内部 |
+
+### アクション
+
+| アクション | 型 | 用途 |
+| --- | --- | --- |
+| `/navigate_to_pose` | `nav2_msgs/NavigateToPose` | **ナビゲーションの主入口** |
+| `/navigate_through_poses` | `nav2_msgs/NavigateThroughPoses` | 経由点つき |
+| `/follow_waypoints` | `nav2_msgs/FollowWaypoints` | ウェイポイント追従 |
+| `/compute_path_to_pose` | `nav2_msgs/ComputePathToPose` | 経路計画だけ（走らない） |
+| `/follow_path` | `nav2_msgs/FollowPath` | 与えた経路の追従だけ |
+| `/spin` `/backup` `/drive_on_heading` `/wait` | `nav2_msgs/*` | 復帰behavior。**単体でも呼べる** |
+| `/joint_trajectory_controller/follow_joint_trajectory` | `control_msgs/FollowJointTrajectory` | アーム 5 関節。リーチノードが使う |
+| `/gripper_controller/gripper_cmd` | `control_msgs/ParallelGripperCommand` | グリッパ |
+
+### サービス
+
+| サービス | 型 | 用途 |
+| --- | --- | --- |
+| `/so101/stow` | `std_srvs/Trigger` | **アームを畳む。停止前に必ず** |
+| `/so101/lerobot_bridge/shutdown` | `std_srvs/Trigger` | ★ **トルクOFFして終了。`make down` が先に呼ぶ**（`docker compose down` は exec したプロセスに SIGINT を届けないため） |
+| `/so101/lerobot_bridge/ready` | `std_srvs/Trigger` | 起動同期用。launch が待つ |
+| `/lekiwi_base_driver/recover` | `std_srvs/Trigger` | ベースドライバの復帰 |
+| `/controller_manager/list_controllers` | `controller_manager_msgs/ListControllers` | コントローラの状態 |
+| `/controller_manager/switch_controller` | `controller_manager_msgs/SwitchController` | 起動・停止 |
+| `/joint_trajectory_controller/query_state` | `control_msgs/QueryTrajectoryState` | 軌道の内挿値を問い合わせ |
+
+---
+
+## CLI テストコマンド
+
+### 0. まず健全性を見る
+
+```bash
+make check
+```
+
+`/robot_description` = **1**、`/joint_states` = **2**、コントローラ 3 つが `active`、
+`map → arm_gripper_frame_link` の TF が出れば正常。
+
+```bash
+$E ros2 node list                  # ノード一覧
+$E ros2 topic list                 # ★ discovery 待ちで最初は少なく出る
+$E ros2 action list -t             # 型つき
+$E ros2 run tf2_tools view_frames -o /tmp/frames   # TF ツリーの PDF
+```
+
+### 1. TF（すべての土台）
+
+```bash
+$E ros2 run tf2_ros tf2_echo map base_footprint          # 自己位置
+$E ros2 run tf2_ros tf2_echo base_link laser_link        # 実測 (0.10, 0, 0.03) yaw −7°
+$E ros2 run tf2_ros tf2_echo base_link arm_gripper_frame_link
+#   ★ 全関節ゼロなら (0.471, 0.000, 0.283) になるはず
+```
+
+### 2. ベース（★ 車輪を浮かせてから）
+
+```bash
+# ★ --once は discovery 前に publisher が終わって 1 通も届かないことがある。
+#   base_driver の watchdog も 0.5 秒なので、2 秒流すほうが確実。
+$E ros2 topic pub -r 10 --times 20 /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.05}}'
+
+$E ros2 topic echo /odom --once
+$E ros2 topic hz /joint_states
+$E ros2 service call /lekiwi_base_driver/recover std_srvs/srv/Trigger '{}'
+```
+
+### 3. ナビゲーション
+
+```bash
+# トピックで送る（RViz の "2D Goal Pose" と同じ）
+$E ros2 topic pub --once -w 1 /goal_pose geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.5}, orientation: {w: 1.0}}}'
+
+# アクションで送る（結果とフィードバックが得られる。こちらが本筋）
+$N ros2 action send_goal -f /navigate_to_pose nav2_msgs/action/NavigateToPose \
+  '{pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.5}, orientation: {w: 1.0}}}}'
+
+# 経路計画だけ（走らせずに到達可能かを見る）
+$N ros2 action send_goal /compute_path_to_pose nav2_msgs/action/ComputePathToPose \
+  '{goal: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.5}, orientation: {w: 1.0}}}, use_start: false}'
+
+# その場旋回だけ（復帰behavior の単体テスト）
+$N ros2 action send_goal /spin nav2_msgs/action/Spin '{target_yaw: 1.57}'
+
+$E ros2 topic echo /plan --once            # 大域経路
+$E ros2 topic hz /cmd_vel                  # 走行指令が出ているか
+$N ros2 lifecycle get /bt_navigator        # active でなければ経路計画も走らない
+```
+
+保存地図構成では、走らせる前に初期姿勢を与える（RViz の **"2D Pose Estimate"**）。
+
+```bash
+$E ros2 topic pub --once -w 1 /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
+  '{header: {frame_id: map}, pose: {pose: {position: {x: 0.0, y: 0.0}, orientation: {w: 1.0}}}}'
+```
+
+> ★ **SLAM 構成（`make reach`）では `/initialpose` の購読者が居ない**（amcl が動いていない）。
+> `-w 1` は購読者を待つので**そのまま固まる**。保存地図構成（`make reach-with-map`）専用。
+
+### 4. アーム（★ 🔴 実際に動く。人が立ち会うこと）
+
+```bash
+$E ros2 control list_controllers                       # 3 つが active か
+$E ros2 control list_hardware_components
+$E ros2 topic echo /joint_states --once
+
+# 軌道を直接送る（リーチノードを介さない最小テスト）
+$E ros2 action send_goal -f /joint_trajectory_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  '{trajectory: {joint_names: [arm_shoulder_pan_joint, arm_shoulder_lift_joint,
+     arm_elbow_flex_joint, arm_wrist_flex_joint, arm_wrist_roll_joint],
+    points: [{positions: [0.0, 0.0, 0.5, 0.5, 0.0], time_from_start: {sec: 3}}]}}'
+
+# グリッパ
+$E ros2 action send_goal /gripper_controller/gripper_cmd \
+  control_msgs/action/ParallelGripperCommand '{command: {position: [0.5]}}'
+```
+
+### 5. リーチ
+
+```bash
+# 判定を先に流しておく（VOLATILE なので後から繋ぐと取り逃す）
+$E ros2 topic echo /so101/reach_status &
+
+# 到達可能な目標
+$E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: 0.35, y: 0.05, z: 0.25}, orientation: {w: 1.0}}}'
+
+# 到達不能（★ 軌道トピックに 1 件も出ないこと＝アームが動かないことを確認する）
+$E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: 2.0, y: 0.0, z: 0.5}, orientation: {w: 1.0}}}'
+$E ros2 topic hz /joint_trajectory_controller/joint_trajectory    # 出ないのが正しい
+
+# RViz の Publish Point と同じ経路（型が PointStamped であることに注意）
+$E ros2 topic pub --once -w 1 /clicked_point geometry_msgs/msg/PointStamped \
+  '{header: {frame_id: map}, point: {x: 0.30, y: -0.10, z: 0.20}}'
+
+# 畳む（★ 停止前に必ず）
+$E ros2 service call /so101/stow std_srvs/srv/Trigger '{}'
+```
+
+### 6. 故障を意図的に起こして確認する
+
+```bash
+# slam を止める -> REJECTED_STALE_TF（古い座標で黙って解かない）
+$N ros2 lifecycle set /slam_toolbox deactivate
+
+# ベースを止める -> REJECTED_STALE_ODOM
+docker stop lekiwi-nav
+
+# 誤ったフレーム -> REJECTED_WRONG_FRAME
+$E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: odom}, pose: {position: {x: 0.3, y: 0.0, z: 0.2}, orientation: {w: 1.0}}}'
+```
+
+---
+
 ## 状態メッセージ
 
 `/so101/reach_status`（`std_msgs/String`）に 1 行ずつ出る。
@@ -119,8 +323,8 @@ make down     # 2. bridgeをshutdownしてトルクOFF後、コンテナを停�
 | 区間 | 寄与 |
 | --- | --- |
 | `map`→`odom`（slam_toolbox） | **2〜5cm（支配的）** |
-| `base_link`→`arm_mount_link` | ±5mm（CAD 由来、**未実測**） |
-| `arm_mount_link`→`arm_base_link` | **未検証。yaw が 90° 違う可能性もある** |
+| `base_link`→`arm_mount_link` | **実測済み**（2026-08-07）。y は CAD の −0.04 ではなく 0 だった |
+| `arm_mount_link`→`arm_base_link` | 恒等（実測で向きは仮定どおり） |
 | アーム FK | 1〜2cm（肩で 1° = 0.35m 先で 6mm） |
 
 `ACCEPTED` に出る `residual` は**ソルバの残差**であって物理精度ではない。
@@ -137,9 +341,9 @@ make down     # 2. bridgeをshutdownしてトルクOFF後、コンテナを停�
 
 | 項目 | 現状 |
 | --- | --- |
-| `laser_link` の位置 | **TBD 仮値 (0.10, 0, 0.03)。** xy が違うと回転時のてこ比として効き、地図が向き依存で歪む。その誤差がそのまま手先に乗る |
-| `arm_mount_link` の位置と **yaw** | CAD 由来で未実測。RViz でマゼンタのマーカーとして見える |
-| `joint_limit_overrides` | **空。** `laser_link` と `arm_mount_link` は xy で **44mm** しか離れていない。無通電でアームを手で振り、干渉する角度を調べてから埋めること |
+| `laser_link` の位置 | **実測済み (0.10, 0, 0.03)、yaw = −7°**（2026-08-07） |
+| `arm_mount_link` の位置と **yaw** | **実測済み (0.08, 0.00, 0.057) rpy 0**（2026-08-07）。★ CAD の y=−0.04 は誤りで、実測は **y=0** だった |
+| `joint_limit_overrides` | **空。★ 実測で y=0 が確定した結果、`laser_link` (0.10, 0) と `arm_mount_link` (0.08, 0) の xy 距離は 44mm ではなく **20mm** しかない。**当初の想定より近い。**無通電でアームを手で振り、干渉する角度を調べてから埋めること |
 | `stow_positions` | 暫定値 `[0, 0, 1.25, 1.31, 0]`。アーム基部の真上に折り畳み、手先は機体中心から水平 0.096m・高さ 0.112m（車輪円 0.125 と `robot_radius` 0.17 の内側）。**初回は必ず無通電で手を添え、干渉しないことを確かめること** |
 
 手順は `docs/agent/request.md` にある。

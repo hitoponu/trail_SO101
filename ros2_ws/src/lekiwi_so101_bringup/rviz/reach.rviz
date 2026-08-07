@@ -61,6 +61,63 @@ Visualization Manager:
       Style: Points
       Color: 255; 85; 0
       Color Transformer: FlatColor
+    # ---- Nav2 ----
+    # ★ ベースコンテナの nav2 は動いているのに、この設定に表示もツールも
+    #   無かったため RViz からナビゲーションを指示できなかった。
+    - Class: rviz_default_plugins/Path
+      Name: Global Plan
+      Enabled: true
+      Topic:
+        Value: /plan
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 0; 255; 0
+      Line Width: 0.02
+    # ★ MPPI コントローラが出すのは /optimal_trajectory。
+    #   nav2 の他のコントローラでよく使われる /local_plan は**この構成では存在しない**
+    #   (ros2 topic type で確認済み)。
+    - Class: rviz_default_plugins/Path
+      Name: Optimal Trajectory (MPPI)
+      Enabled: true
+      Topic:
+        Value: /optimal_trajectory
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 255; 0; 255
+      Line Width: 0.02
+    - Class: rviz_default_plugins/Map
+      Name: Global Costmap
+      Enabled: false
+      Topic:
+        Value: /global_costmap/costmap
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.4
+      Color Scheme: costmap
+    - Class: rviz_default_plugins/Map
+      Name: Local Costmap
+      Enabled: false
+      Topic:
+        Value: /local_costmap/costmap
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.4
+      Color Scheme: costmap
+    # ★ 走行時のフットプリント。nav2.yaml の robot_radius: 0.17 は
+    #   **アームを畳んだ状態**の前提。伸ばしたまま走ると通れない隙間を計画する。
+    - Class: rviz_default_plugins/Polygon
+      Name: Footprint
+      Enabled: true
+      Topic:
+        Value: /local_costmap/published_footprint
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 25; 255; 255
     # リーチ目標。緑 = 受理、赤 = 棄却。
     - Class: rviz_default_plugins/Marker
       Name: Reach Target
@@ -80,7 +137,17 @@ Visualization Manager:
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
       Line color: 128; 128; 0
+    # ★ amcl の初期姿勢。保存地図構成では必須（起動直後は自己位置が未確定）。
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
+    # ★ ナビゲーションの目標。これが無いと RViz から走らせられない。
+    #   PoseStamped を /goal_pose へ出し、nav2 の bt_navigator が受ける。
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
     # ★ これがリーチ目標の入力。PointStamped を /clicked_point へ出す。
+    #   ナビゲーションの "2D Goal Pose" とは別物なので混同しないこと。
     - Class: rviz_default_plugins/PublishPoint
       Single click: true
       Topic:
