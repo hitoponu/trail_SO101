@@ -121,10 +121,8 @@ services:
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
       ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
       ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
-      # ★ 手首カメラの取付姿勢。実測したら .env に書く。
-      #   結合 URDF の既定値としてここから読まれる。
-      #   ★★ 既定値は実測値ではなく、公式 STL からの幾何計算値
-      #      (D405 + Wrist_Roll_D405_Holder 前提)。docs/wrist_camera.md 参照。
+      # ★ 手首カメラのwebcam基準位置・姿勢。
+      #   固定台そのものではなく、webcamを載せた位置を結合URDFの基準値として読む。
       WRIST_CAMERA: ${WRIST_CAMERA:-true}
       WRIST_CAMERA_NAME: ${WRIST_CAMERA_NAME:-wrist_camera}
       WRIST_CAMERA_PARENT: ${WRIST_CAMERA_PARENT:-gripper_link}
@@ -132,7 +130,7 @@ services:
       WRIST_CAMERA_Y: ${WRIST_CAMERA_Y:--0.07112}
       WRIST_CAMERA_Z: ${WRIST_CAMERA_Z:--0.02074}
       WRIST_CAMERA_ROLL: ${WRIST_CAMERA_ROLL:-3.14159}
-      WRIST_CAMERA_PITCH: ${WRIST_CAMERA_PITCH:-1.04718}
+      WRIST_CAMERA_PITCH: ${WRIST_CAMERA_PITCH:-1.13445}
       WRIST_CAMERA_YAW: ${WRIST_CAMERA_YAW:-1.57080}
     devices:
       - ${SO101_DEVICE:-/dev/so101_follower}:${SO101_DEVICE:-/dev/so101_follower}

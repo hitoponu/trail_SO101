@@ -50,20 +50,9 @@
        取り付けは arm_gripper_link。wrist_roll と一緒に回るので、
        リーチのソルバが wrist_roll を凍結する以上ロール角は一定になる。
 
-       ★★ 既定値は **実測値ではない**。公式 STL から幾何計算した参考値であり、
-          しかも **D405 + Wrist_Roll_D405_Holder を前提とした値**。
-          手元の D435i には SO-101 用の公式マウントが存在しないため、
-          この値がそのまま正しくなる構成は現時点では無い。
-          「0 よりマシな初期値」以上の意味を持たせないこと。
-
-          導出の根拠と再計算手順は docs/wrist_camera.md の
-          「幾何計算による参考値」節。要点だけ:
-            - SO101/assets の asset と公式 STL は同一座標系 (bbox 完全一致)
-            - D405 の M3 取付穴は背面 (Ø2.48 x2, 20.00mm)。光軸は取付面に垂直
-            - 誤差 ±2mm / ±2 度。roll は ±180 度の曖昧さが残る
-          W-5 で実測値が出たら .env で上書きし、確定したらここも差し替える。
-
-       ★ 未実測であることに変わりはないので、TBD マーカー (マゼンタ) は残す。 -->
+       ★ wrist_camera_* は固定台ではなく、webcam の基準位置・姿勢を表す。
+         webcam 用固定台から見たカメラの位置・向きを先に反映し、
+         D435i のレンズ中心との差だけを後段で補正する。 -->
   <xacro:arg name="wrist_camera" default="true"/>
   <xacro:arg name="wrist_camera_name" default="wrist_camera"/>
   <xacro:arg name="wrist_camera_parent" default="gripper_link"/>
@@ -71,7 +60,7 @@
   <xacro:arg name="wrist_camera_y" default="-0.07112"/>
   <xacro:arg name="wrist_camera_z" default="-0.02074"/>
   <xacro:arg name="wrist_camera_roll" default="3.14159"/>
-  <xacro:arg name="wrist_camera_pitch" default="1.04718"/>
+  <xacro:arg name="wrist_camera_pitch" default="1.13445"/>
   <xacro:arg name="wrist_camera_yaw" default="1.57080"/>
 
   <xacro:include filename="$(find lekiwi_description)/urdf/lekiwi_base.macro.xacro"/>
@@ -113,13 +102,12 @@
   -->
   <xacro:if value="$(arg wrist_camera)">
     <joint name="$(arg wrist_camera_name)_mount_joint" type="fixed">
-      <origin xyz="$(arg wrist_camera_x) $(arg wrist_camera_y) $(arg wrist_camera_z)"
-              rpy="$(arg wrist_camera_roll) $(arg wrist_camera_pitch) $(arg wrist_camera_yaw)"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <parent link="$(arg prefix)$(arg wrist_camera_parent)"/>
       <child link="$(arg wrist_camera_name)_mount_link"/>
     </joint>
 
-    <!-- TBD マーカー。RViz で取付位置が未確定だと分かるようにする。 -->
+    <!-- gripper_link 直下の中継フレーム。位置の基準はここでは持たない。 -->
     <link name="$(arg wrist_camera_name)_mount_link">
       <visual>
         <geometry>
@@ -129,10 +117,11 @@
       </visual>
     </link>
 
-    <!-- D435i の筐体 (90 x 25 x 25 mm)。camera_link は筐体の中心ではなく
-         左赤外イメージャ基準だが、見た目の目安として置く。 -->
+    <!-- webcam 基準位置に置くカメラフレーム。
+         D435i の筐体 (90 x 25 x 25 mm) は見た目の目安として置く。 -->
     <joint name="$(arg wrist_camera_name)_link_joint" type="fixed">
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="$(arg wrist_camera_x) $(arg wrist_camera_y) $(arg wrist_camera_z)"
+              rpy="$(arg wrist_camera_roll) $(arg wrist_camera_pitch) $(arg wrist_camera_yaw)"/>
       <parent link="$(arg wrist_camera_name)_mount_link"/>
       <child link="$(arg wrist_camera_name)_link"/>
     </joint>
