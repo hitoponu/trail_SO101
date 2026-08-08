@@ -112,6 +112,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-realsense2-description \
     && rm -rf /var/lib/apt/lists/*
 
+# ── 上流リポジトリ (ros2_so_arm / sllidar_ros2) ───────────────────────
+# ★ /ros2_ws ではなく /opt/upstream に置く。
+#   compose.yaml が ../../ros2_ws:/ros2_ws を bind mount するので、
+#   **Dockerfile が /ros2_ws に書いたものは実行時に完全に隠れる**（実測確認済み）。
+#   bootstrap.sh がここから ros2_ws/src/ へコピーする。
+#
+# これをイメージ側でやる理由:
+#   * bootstrap がオフラインで完結する (実機 PC の回線に依存しない)
+#   * SHA のドリフトが原理的に起きない。以前は bootstrap がディレクトリの
+#     有無しか見ておらず、so101_upstream.repos の SHA を上げても既存の
+#     チェックアウトを黙って使い続けていた
+#   * 更新したいときは so101_upstream.repos を書き換えて make build
+# ★ .git を消さないこと。`git -C src/ros2_so_arm rev-parse HEAD` が
+#   「いま何が入っているか」を確かめる唯一の手段になる。
+COPY ros2_ws/so101_upstream.repos /opt/so101_upstream.repos
+RUN mkdir -p /opt/upstream \
+    && vcs import /opt/upstream < /opt/so101_upstream.repos \
+    && vcs export --exact /opt/upstream > /opt/upstream/.resolved.repos
+
 WORKDIR /ros2_ws
 
 # ── Python の実行依存 ─────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 .codex
 .env
 .venv
-SO101
+# examples/ に lerobot 用の SO101 モデル (16MB) も含まれる。
 examples
 uv.lock
 

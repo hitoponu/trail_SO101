@@ -1,8 +1,22 @@
-# 取り込む上流リポジトリ。bootstrap.sh が `vcs import src < この定義` で展開する。
+# 取り込む上流リポジトリ。
+#
+# ★ 取得は **イメージのビルド時** に行う (docker/robot/Dockerfile が
+#   `vcs import /opt/upstream < この定義`)。bootstrap.sh はそれを
+#   ros2_ws/src/ へコピーするだけで、ネットワークを使わない。
+#
+#   なぜ /ros2_ws ではなく /opt/upstream なのか:
+#   compose.yaml が ../../ros2_ws:/ros2_ws を bind mount するため、
+#   **Dockerfile が /ros2_ws に置いたものは実行時に完全に隠れる**（実測確認済み）。
+#   マウントの外に置いてからコピーする必要がある。
+#
+#   この方式の利点:
+#     * bootstrap がオフラインで完結する (実機 PC の回線に依存しない)
+#     * SHA のドリフトが原理的に起きない。イメージに焼かれたものが唯一の実体で、
+#       更新したければ `make build` からやり直すことになる
 #
 # なぜ vendored コピー (git にコミット) にしないか:
 #   so_arm101_description/meshes/*.stl は、既にこのリポジトリで追跡している
-#   SO101/assets/*.stl と **バイト単位で同一** (13ファイル、約16MB)。
+#   examples/SO101/assets/*.stl と **バイト単位で同一** (13ファイル、約16MB。cmp で検証済み)。
 #   コミットすると同じバイト列を二重に git 履歴へ入れることになる。
 #   実体は .gitignore の ros2_ws/src/ros2_so_arm/ で追跡から外している。
 #

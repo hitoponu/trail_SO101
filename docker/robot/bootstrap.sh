@@ -21,21 +21,59 @@ source /opt/ros/jazzy/setup.bash
 
 cd /ros2_ws
 
-# ── 上流の取得 ────────────────────────────────────────────────────────
+# ★ colcon の作業ディレクトリを先に作っておく。
+#   build / install / log は .gitignore 済みなので **clone 直後は存在しない**。
+#   colcon は自分で作るが、上流を cp -a した直後 (macOS の virtiofs 越しに
+#   16MB / 数千ファイル) に走らせると、log/ の作成が
+#     FileNotFoundError: 'log/build_YYYY-MM-DD_hh-mm-ss'
+#   で落ちることがあった (実際に一度踏んだ)。単純な colcon build では再現せず
+#   タイミング依存なので、先に作って競合の余地を無くす。
+mkdir -p build install log
+
+# ── 上流をイメージから配置する ────────────────────────────────────────
 # ros2_so_arm (アームの description) と sllidar_ros2 (LiDAR ドライバ)。
-# どちらも so101_upstream.repos で SHA 固定。
-# vcs import は既存ディレクトリを skip するので、足りないものがあるときだけ走らせる。
-missing=()
-for repo in ros2_so_arm sllidar_ros2; do
-  [ -d "src/$repo" ] || missing+=("$repo")
-done
-if [ ${#missing[@]} -gt 0 ]; then
-  echo "== 上流を取得します: ${missing[*]} =="
-  vcs import src < so101_upstream.repos
-else
-  echo "== 上流は取得済み。スキップします =="
-  echo "   (更新するには src/ros2_so_arm や src/sllidar_ros2 を消してから再実行)"
+# **取得はイメージのビルド時に済んでいる** (docker/robot/Dockerfile が
+# /opt/upstream へ vcs import 済み)。ここではコピーするだけで、
+# ネットワークを一切使わない。
+#
+# ★ なぜコピーが要るのか
+#   compose.yaml が ../../ros2_ws:/ros2_ws を bind mount するため、
+#   イメージが /ros2_ws に置いたものは実行時に完全に隠れる（実測確認済み）。
+#   マウントの外 (/opt/upstream) からマウントの中へ運ぶ必要がある。
+#
+# ★ ホスト側にも実体を置く（symlink にしない）理由
+#   ホストのエディタや grep から上流ソースを読めるようにするため。
+#   URDF の関節可動域を確認する、といった作業が頻繁に発生する。
+UPSTREAM=/opt/upstream
+if [ ! -d "$UPSTREAM" ]; then
+  echo "ERROR: $UPSTREAM がありません。イメージが古い可能性があります。" >&2
+  echo "       make build からやり直してください。" >&2
+  exit 1
 fi
+
+for repo in "$UPSTREAM"/*/; do
+  name="$(basename "$repo")"
+  if [ -d "src/$name" ]; then
+    continue
+  fi
+  echo "== 上流を配置します: $name =="
+  cp -a "$repo" "src/$name"
+done
+
+# ★ 何が入っているかを毎回表示する。イメージを作り直さずに src/ だけ残っていると
+#   古い上流を使い続けることになるので、SHA を目に見えるところへ出す。
+echo "== 上流のバージョン =="
+for repo in "$UPSTREAM"/*/; do
+  name="$(basename "$repo")"
+  image_sha="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  ws_sha="$(git -C "src/$name" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  if [ "$image_sha" = "$ws_sha" ]; then
+    echo "   $name: $ws_sha"
+  else
+    echo "   ★ $name: ワークスペース $ws_sha / イメージ $image_sha （食い違っています）"
+    echo "     イメージのものを使うなら: rm -rf src/$name してから再実行"
+  fi
+done
 
 # --symlink-install の成果物には src を指すシンボリックリンクが残る。
 # データファイルを消したりブランチを切り替えたりすると、リンク先が消えて
@@ -58,14 +96,16 @@ done
 
 echo
 echo "== ビルドします =="
-# ★ --packages-select で明示する。ワークスペース全体を build すると
-#   src/ros2_so_arm/ に同梱されている so_arm100_moveit_config や so_arm_gz まで
-#   対象になり、MoveIt と Gazebo が入っていないこのイメージでは失敗する。
+# ★ --packages-ignore を使う（--packages-select ではない）。
+#   select だと自作パッケージを src/ に置いてもビルド対象に入らず、
+#   「作ったのに ros2 run で見つからない」という分かりにくい詰まり方をする。
+#   ignore なら **src/ に置いたものは自動でビルドされる**。
+#
+#   除外するのは上流 ros2_so_arm に同梱されている SO-ARM100 系だけ。
+#   so_arm_gz は Gazebo、so_arm100_moveit_config は MoveIt を要求するが、
+#   どちらもこのイメージに入っていない (この機体は SO-101 なので使わない)。
 colcon build --symlink-install \
-  --packages-select so_arm_utils so_arm101_description sllidar_ros2 \
-                    so101_bringup \
-                    lekiwi_description lekiwi_base_bringup lekiwi_so101_bringup \
-                    rplidar_bringup realsense_bringup
+  --packages-ignore so_arm_gz so_arm100_description so_arm100_moveit_config
 
 # ★ Dockerfile にあった静的スモークテストの移設先。
 #   ワークスペースをマウントする方式ではビルド時に検査できないので、
@@ -156,6 +196,9 @@ echo "  docker compose up -d"
 echo "  docker compose exec -it robot bash"
 echo "  ros2 launch lekiwi_so101_bringup robot.launch.py backend:=lerobot robot_id:=my_follower"
 echo
-echo "設定や Python コードを編集したら launch を上げ直すだけで反映されます。"
-echo "ファイルを追加した場合だけ、コンテナ内で colcon build してください:"
-echo "  colcon build --symlink-install --packages-select so101_bringup"
+echo "設定や Python コードを編集したら launch を上げ直すだけで反映されます"
+echo "(--symlink-install なので colcon build も要りません)。"
+echo
+echo "ファイルやパッケージを**追加**した場合だけ、コンテナ内で:"
+echo "  colcon build --symlink-install --packages-select <パッケージ名>"
+echo "  source install/setup.bash"

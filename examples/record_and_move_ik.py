@@ -74,7 +74,7 @@ def load_config(path: Path) -> dict:
 
 def build_kinematics(kin_cfg: dict) -> RobotKinematics:
     """config の [kinematics] から RobotKinematics を構築する。"""
-    urdf_path = Path(kin_cfg.get("urdf_path", "SO101/so101_new_calib.urdf"))
+    urdf_path = Path(kin_cfg.get("urdf_path", "examples/SO101/so101_new_calib.urdf"))
     if not urdf_path.is_absolute():
         urdf_path = REPO_ROOT / urdf_path
     if not urdf_path.exists():
