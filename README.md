@@ -440,8 +440,7 @@ trail_SO101/
 │   ├── so101_ros2/             以下は 1 サブシステムだけ切り分けたいとき用
 │   ├── lekiwi_base_ros2/
 │   ├── rplidar_ros2/
-│   ├── realsense_ros2/
-│   └── lekiwi_so101_bringup/   旧 4 コンテナ構成
+│   └── realsense_ros2/
 ├── ros2_ws/src/
 │   ├── so101_bringup/          アーム。LeRobot ブリッジ、リーチ、逆運動学
 │   ├── lekiwi_base_bringup/    ベース。ドライバ、オドメトリ、スキャン処理

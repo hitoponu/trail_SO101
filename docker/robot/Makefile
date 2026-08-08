@@ -44,11 +44,15 @@ MAP_DIR        ?= $(HOME)/maps
 
 # ★ 別スタックのコンテナが同じ ROS_DOMAIN_ID に居ると /robot_description が
 #   二重に latch され、/tf も混信する (CLAUDE.md の「RViz に別のロボットが出る」)。
-#   統合したのでスタック内には 1 コンテナしか無い。止めたいのは
-#   **旧 4 コンテナ構成と単体デバッグ用スタックのコンテナ**。
-LEGACY := so101-follower lekiwi-base lekiwi-nav lekiwi-nav-mock \
-          lekiwi-so101-arm lekiwi-so101-arm-mock rplidar-a1 \
-          realsense-d435i lekiwi-wrist-camera
+#   統合したのでスタック内には 1 コンテナしか無い。止めたいのは他スタックのもの。
+#
+#   単体デバッグ用に残してあるスタックのコンテナ:
+LEGACY := so101-follower lekiwi-base lekiwi-base-dryrun rplidar-a1 realsense-d435i
+#   ★ 削除済みの 4 コンテナ構成 (docker/lekiwi_bringup, lekiwi_so101_bringup)。
+#     compose ファイルはもう無いが、**実機に古いコンテナが残っている可能性がある**
+#     ので検出は続ける。しばらく経って実機から消えたら外してよい。
+LEGACY += lekiwi-nav lekiwi-nav-mock lekiwi-so101-arm lekiwi-so101-arm-mock \
+          lekiwi-wrist-camera
 CONFLICTS_FOR_REAL := $(LEGACY) $(SVC_MOCK)
 CONFLICTS_FOR_MOCK := $(LEGACY) $(SVC)
 

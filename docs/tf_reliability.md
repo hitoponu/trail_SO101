@@ -154,4 +154,5 @@ RViz の色を「未確定の目印」として使う運用なので、**色を�
 | リーチの概要と実機検証項目 | [`docs/lekiwi_so101_reach.md`](lekiwi_so101_reach.md) |
 | 手首カメラの実機手順（W-5 で取付を実測） | [`docs/wrist_camera.md`](wrist_camera.md) |
 | 実機の現在の状態 | [`docs/hardware_agent.md`](hardware_agent.md) |
-| 運用・インターフェース一覧 | [`docker/lekiwi_so101_bringup/README.md`](../docker/lekiwi_so101_bringup/README.md) |
+| インターフェース一覧・CLI テスト | [`interfaces.md`](interfaces.md) |
+| 起動と停止 | [`../docker/robot/README.md`](../docker/robot/README.md) |

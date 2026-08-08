@@ -206,6 +206,25 @@ make release-check     # = release_all --dry-run
 > 失敗を握り潰すので、「呼べた」ことは「切れた」ことを意味しない。
 > **読み戻して 0 だった ID だけ成功**として扱う。
 
+## 個々のノードが落ちたとき何が起きるか
+
+1 コンテナ・1 launch なので、**ノードが 1 つ落ちても他は生き続けます。**
+launch 全体が落ちた場合（SIGKILL）は前節を参照。
+
+| 落ちたもの | 影響 | 復帰 |
+| --- | --- | --- |
+| **アームのブリッジ**（シリアル異常 / watchdog 期限切れ） | **アームだけトルク OFF → 脱力する。** `robot_state_publisher` は生き残るので、ベースの SLAM / Nav2 は測位を失わない | launch を上げ直す |
+| `base_driver` | `/odom` が止まる。リーチは `REJECTED_STALE_ODOM` で拒否。★ ホイールは `finally` の `safe_stop()` で速度ゼロ + トルク OFF | 同上 |
+| `slam_toolbox` | `map → odom` が**凍る**（消えない）。リーチは `REJECTED_STALE_TF` で拒否し、**黙って古い座標で解かない** | 同上 |
+| `scan_filter` | `/scan_filtered` の publisher が 0 になり `map → odom` が出なくなる。★ Nav2 は `Invalid frame ID map` を **INFO で**吐き続けるのでエラーに見えない | 同上 |
+| `realsense2_camera` | 点群が止まるだけ。TF もリーチもナビも影響を受けない | 同上 |
+
+> ★ **アームの故障をアームだけに閉じ込めている。**
+> `robot.launch.py` は `follower.launch.py` を `shutdown_on_bridge_exit:=false`
+> で include している。既定の `true` だと、ブリッジが落ちた瞬間に launch service
+> 全体が止まり、**同居している唯一の `robot_state_publisher` も道連れ**になって
+> `base_footprint → laser_link` の TF が消え、SLAM と Nav2 が測位を失う。
+
 ## 健全性チェック
 
 ```bash

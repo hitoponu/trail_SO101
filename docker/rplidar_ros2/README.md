@@ -163,7 +163,7 @@ A1M8の標準設定は115200 baud、`Standard` scan modeです。変更が必要
 ### `/scan` のフレーム名
 
 既定は `laser_link` です。`lekiwi_description` が定義するリンク名に合わせてあり、
-LeKiwi ベースと同時に起動したとき（[`../lekiwi_bringup/`](../lekiwi_bringup/)）に
+LeKiwi ベースと同時に起動したとき（[`../robot/`](../robot/)）に
 `/scan` が `base_link → laser_link` の TF へ繋がります。ここがずれていると
 点群は表示できても SLAM や Nav2 の costmap が一切埋まりません。
 

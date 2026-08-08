@@ -21,7 +21,7 @@ outputs/
 ros2_ws/src/ros2_so_arm/
 ros2_ws/src/sllidar_ros2/
 
-# SLAM で保存した地図 (docker/lekiwi_bringup の MAP_DIR 既定値)
+# SLAM で保存した地図 (docker/robot の MAP_DIR 既定値)
 maps/
 
 # colcon

@@ -25,10 +25,6 @@ docker/lekiwi_base_ros2/99-lekiwi.rules
 docker/so101_ros2/.env
 docker/so101_ros2/README.md
 docker/so101_ros2/99-so101.rules
-docker/lekiwi_bringup/.env
-docker/lekiwi_bringup/README.md
-docker/lekiwi_so101_bringup/.env
-docker/lekiwi_so101_bringup/README.md
 docker/robot/.env
 docker/robot/README.md
 
