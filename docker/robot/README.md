@@ -18,7 +18,7 @@ LiDAR / SLAM / Nav2 / SO-101 アーム / 手首カメラ（RealSense）を **1 �
 | `nav2_msgs` がベースのイメージにしか無く、アーム側から action を叩くと `The passed action type is invalid` | **消える**（全部同じイメージ） |
 | DDS discovery の遅れで `ros2 topic list` が不完全 | 大幅に軽減 |
 | `/robot_description` の publisher を 1 つに保つための調整 | launch が 1 つなので自明 |
-| `docker compose down` が `exec` した launch に SIGINT を届けない | **launch を前面で Ctrl+C する**運用に統一 |
+| `docker compose down` が `exec` した launch に SIGINT を届けない | ★ **これは統合しても消えない。** launch を前面で `Ctrl+C` する運用で回避する（下記） |
 | compose の `camera_name` と URDF の `wrist_camera_name` の不一致 | launch が同じ値を両方へ渡す |
 
 代償:
@@ -77,10 +77,17 @@ docker compose exec -it robot /entrypoint.sh \
     backend:=lerobot robot_id:=my_follower
 ```
 
-**コンテナは bash を起動するだけで、launch は人が手で叩く。**
-compose の `command:` に launch を書くと停止が docker 側の都合になり、
-`docker compose down` は `exec` したプロセスに SIGINT を届けない。
-launch を前面で走らせて `Ctrl+C` するのがいちばん確実に停止処理が走る。
+**コンテナは bash を起動するだけで、launch は人が手で叩く。** 理由は 2 つ。
+
+1. `docker compose up -d` でロボットが動き出さないようにするため
+   （`command:` に launch を書くと**上げた瞬間にトルクが入る**）
+2. 起動のたびに引数が変わるため（`backend` / `robot_id` / `sim` / `use_saved_map`）
+
+> ★★ **代償: `make down` だけでは止まらない。**
+> `docker compose down` が SIGTERM を送るのは **PID 1 だけ**で、
+> `exec` した launch には**届かず SIGKILL される**（実測で確認）。
+> つまり **トルクが入ったまま残る**。
+> 必ず launch を `Ctrl+C` してから `make down` すること。復帰は `make release`。
 
 ros2 コマンドを使うときは別端末で:
 

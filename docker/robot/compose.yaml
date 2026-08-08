@@ -11,14 +11,23 @@
 #   compose の stop_signal はサービス単位にしか設定できないから」。
 #   実際に踏んだ問題の多くはコンテナ跨ぎであること自体が原因だった
 #   (ROS_DOMAIN_ID の食い違い / nav2_msgs の置き場所 / discovery の遅れ /
-#    /robot_description の二重 latch / docker compose down が SIGINT を届けない)。
-#   1 コンテナにすればこれらは消える。
+#    /robot_description の二重 latch)。1 コンテナにすればこれらは消える。
+#
+#   ★ ただし「docker compose down が exec したプロセスに SIGINT を届けない」
+#     だけは統合しても消えない。下の運用で回避する。
 #
 # ■ コンテナは bash を起動するだけで、launch は人が手で叩く
-#   compose の command に launch を書くと、停止が docker 側の都合になる。
-#   `docker compose down` は exec したプロセスに SIGINT を届けないし、
-#   stop_signal も 1 種類しか選べない。
-#   **launch を前面で走らせて Ctrl+C する**のがいちばん確実に停止処理が走る。
+#   理由は 2 つ:
+#     1. `docker compose up -d` でロボットが動き出さないようにするため。
+#        command に launch を書くと **コンテナを上げた瞬間にトルクが入る**。
+#     2. 起動のたびに引数が変わるため
+#        (backend / robot_id / sim / use_saved_map)。
+#
+#   ★★ 代償: `docker compose down` **だけでは launch が綺麗に止まらない**。
+#     down が SIGTERM を送るのは **PID 1 だけ**で、exec したプロセスには
+#     届かず SIGKILL される (実測で確認)。つまり down 単独では
+#     **トルクが入ったまま残る**。
+#     必ず launch を Ctrl+C してから down すること。復帰は release_all。
 #
 # ■ 停止
 #   通常  : launch を Ctrl+C する (アームのトルク OFF + ホイール停止)

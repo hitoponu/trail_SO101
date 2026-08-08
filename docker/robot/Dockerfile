@@ -11,6 +11,7 @@
 #   * DDS discovery の遅れで `ros2 topic list` が不完全
 #   * /robot_description の publisher を 1 つに保つための調整
 #   * docker compose down が exec した launch に SIGINT を届けない
+#     (★ これだけは統合しても消えない。launch を Ctrl+C する運用で回避する)
 #
 # 1 イメージ 1 コンテナにすればこれらは消える。停止方針が 1 つになる代わりに、
 # 異常終了 (SIGKILL) からの復帰は専用コマンドで賄う:

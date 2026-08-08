@@ -16,38 +16,9 @@ lerobot で動かすリポジトリです。SLAM で地図を作り、Nav2 で�
 6. [サブシステム別の Topic / Service / Action](#6-サブシステム別の-topic--service--action)
 7. [自分でノードを書く](#7-自分でノードを書く)
 
+- [この機体の構成](#この機体の構成)
 - [リポジトリ構成](#リポジトリ構成)
 - [ドキュメント一覧（読む順番）](#ドキュメント一覧読む順番)
-
----
-
-## この機体の構成
-
-```
-        map (slam_toolbox が出す)
-         └ odom (base_driver のオドメトリ積分)
-            └ base_footprint → base_link
-                               ├ laser_link      ← RPLIDAR A1
-                               └ arm_mount_link
-                                  └ arm_base_link … arm_gripper_link
-                                       ├ arm_gripper_frame_link  ← リーチの手先
-                                       └ wrist_camera_link       ← RealSense D435i
-```
-
-| サブシステム | ハードウェア | ポート |
-| --- | --- | --- |
-| **アーム** | Feetech STS3215 × 6（ID 1–6）、**7.4V** | `/dev/so101_follower` |
-| **ベース** | Feetech STS3215 × 3（ID 7/8/9）、**12V**、3輪オムニ | `/dev/lekiwi` |
-| **LiDAR** | RPLIDAR A1M8 | `/dev/rplidar` |
-| **RealSense** | D435i（アームの手首に載せる） | USB |
-
-> ★ **アームとホイールを同じシリアルバスに繋がないこと。**
-> どちらも STS3215 の 1 Mbps で ID も分かれているため**物理的には繋がってしまい**、
-> 繋いだ瞬間に 12V が 7.4V のアームサーボに掛かって壊れます。
-
-> ★ **実機を繋げるのは Linux だけです。** macOS の Docker はシリアル / USB
-> デバイスをコンテナへ渡せません。Mac では `make mock`（実機に触れない構成）
-> までしか実行できません。
 
 ---
 
@@ -125,26 +96,57 @@ make bootstrap
 
 ## 4. 起動する
 
-> ## ★ 先に読んでください
+> ## ★ サーボのトルクの切り替えについて
 >
-> **「止める」＝「アームが落ちる」です。**
->
-> | 場面 | 何が起きるか |
-> | --- | --- |
-> | `make run` の**起動直後** | ★ **一瞬トルクが抜けます**。人が支えてください |
-> | launch を `Ctrl+C` | トルク OFF → **落ちます**。ホイールは停止 |
-> | **`docker kill`（使わないこと）** | アームは凍り、**ホイールは最後の指令速度で回り続けます** |
->
-> **★ 非常停止は物理スイッチだけです。** `docker kill` は使えません
-> （1 コンテナなのでベースのドライバも道連れになり、機体が走り去ります）。
->
-> 起動前に確認: **アームの周囲 35cm が空いているか / 人が手を添えているか /
-> 電源スイッチに手が届くか / 車輪を浮かせるか**。
+> robot.launchの起動時にトルクON、終了時にトルクOFFとなります。
+> 
+> トルクがOFFになるとアームは姿勢を保てず落ちることに注意してください。
 
 ```bash
 cd docker/robot
 make run BACKEND=lerobot ROBOT_ID=my_follower
 ```
+
+### ★ コンテナは `bash` を起動するだけ
+
+`make run` は 2 段階です。**コンテナ側では何も動きません。launch は
+その中で人が叩きます。**
+
+```bash
+docker compose up -d                    # ① コンテナが上がる（bash が待つだけ）
+
+docker compose exec -it robot /entrypoint.sh \
+  ros2 launch lekiwi_so101_bringup robot.launch.py \
+    backend:=lerobot robot_id:=my_follower    # ② launch を前面で走らせる
+```
+
+`compose.yaml` の `command:` は `["bash"]` で、launch は書いていません。理由は 2 つです。
+
+1. **`docker compose up -d` でロボットが動き出さないようにするため。**
+   launch を `command:` に書くと、**コンテナを上げた瞬間にトルクが入り**、
+   ノードが全部走り出します。いつ動かすかは人が決めるべきです。
+2. **起動のたびに引数を変えるため。** `backend` / `robot_id` / `sim` /
+   `use_saved_map` は毎回違います。`command:` に書くと compose の編集が要ります。
+
+> ## ★★ 代償: `make down` だけでは止まりません
+>
+> `docker compose down` が SIGTERM を送るのは**コンテナの PID 1 だけ**です。
+> `exec` で起動したプロセス（＝ launch）には**届きません**。
+> launch は SIGKILL され、**トルクが入ったまま残ります**（アームは凍り、
+> ホイールは最後の指令速度で回り続けます）。
+>
+> ```
+> docker compose down で SIGTERM が届くか（実測）
+>   PID 1（compose の command:）  → 届く
+>   exec したプロセス（launch）   → 届かない。SIGKILL される
+> ```
+>
+> **必ず launch の端末で `Ctrl+C` してから `make down` してください。**
+> 順番を逆にしてしまったときの復帰は `make release`（後述）。
+
+引数を変えたいときは ② を直接叩いてください（`make run` が渡すのは
+`backend` / `robot_id` / `start_rviz` と 3 つのポートだけです）。
+`sim` や `use_saved_map` などは ② で指定します。
 
 `ROBOT_ID` は LeRobot の較正 ID です。実物はここで確認できます。
 
@@ -391,6 +393,36 @@ ros2 run my_first_pkg hello
 
 ノードの書き方、QoS の罠、テストの書き方、つまずきポイント集は
 **[`docs/development.md`](docs/development.md)** にまとめてあります。
+
+---
+
+## この機体の構成
+
+```
+        map (slam_toolbox が出す)
+         └ odom (base_driver のオドメトリ積分)
+            └ base_footprint → base_link
+                               ├ laser_link      ← RPLIDAR A1
+                               └ arm_mount_link
+                                  └ arm_base_link … arm_gripper_link
+                                       ├ arm_gripper_frame_link  ← リーチの手先
+                                       └ wrist_camera_link       ← RealSense D435i
+```
+
+| サブシステム | ハードウェア | ポート |
+| --- | --- | --- |
+| **アーム** | Feetech STS3215 × 6（ID 1–6）、**7.4V** | `/dev/so101_follower` |
+| **ベース** | Feetech STS3215 × 3（ID 7/8/9）、**12V**、3輪オムニ | `/dev/lekiwi` |
+| **LiDAR** | RPLIDAR A1M8 | `/dev/rplidar` |
+| **RealSense** | D435i（アームの手首に載せる） | USB |
+
+> ★ **アームとホイールを同じシリアルバスに繋がないこと。**
+> どちらも STS3215 の 1 Mbps で ID も分かれているため**物理的には繋がってしまい**、
+> 繋いだ瞬間に 12V が 7.4V のアームサーボに掛かって壊れます。
+
+> ★ **実機を繋げるのは Linux だけです。** macOS の Docker はシリアル / USB
+> デバイスをコンテナへ渡せません。Mac では `make mock`（実機に触れない構成）
+> までしか実行できません。
 
 ---
 

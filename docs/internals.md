@@ -375,6 +375,14 @@ slam_toolbox が死んでも凍った `map → odom` を返し続けるので、
 - `docker compose down` が `exec` した launch に SIGINT を届けない
 
 いまは 1 コンテナで、**launch を前面で走らせて `Ctrl+C` する**運用に統一しています。
+
+> ★ **最後の 1 つは統合しても消えていません。** `docker compose down` が
+> SIGTERM を送るのは**コンテナの PID 1 だけ**で、`exec` したプロセスには
+> 届かず SIGKILL されます（実測で確認）。`command:` に launch を書けば
+> `down` でも綺麗に止まりますが、そうすると**コンテナを上げた瞬間に
+> ロボットが動き出す**ので採っていません。
+> **`Ctrl+C` してから `down` する**のが正しい順序です。
+
 経緯と代償は [`../docker/robot/README.md`](../docker/robot/README.md)。
 
 ---
