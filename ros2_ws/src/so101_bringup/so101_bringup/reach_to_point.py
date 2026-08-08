@@ -75,7 +75,7 @@ class ReachToPoint(Node):
             # from a tippy one. Use joint_limit_overrides for that.
             "max_reach_radius": 0.55,
             # Floor guard only; it cannot protect the robot body (the plate spans
-            # z 0.025-0.032 and plate2 tops out at 0.089 in base_footprint).
+            # z 0.033-0.040 and plate2 tops out at 0.092 in base_footprint).
             # Use joint_limit_overrides for the body.
             "z_floor": 0.035,
             "floor_frame": "base_footprint",
