@@ -183,6 +183,27 @@ class SerialChain:
         return [(self.by_name[name].lower, self.by_name[name].upper) for name in joint_names]
 
 
+def joint_limits_from_urdf(xml: str) -> dict[str, tuple[float, float]]:
+    """URDF の全可動関節について (lower, upper) を返す。
+
+    ★ SerialChain と違い**チェーンを組まない**。base/tip を知らなくても、
+      関節名だけで可動域を引きたいとき (キーボード操作など) に使う。
+      グリッパのようにチェーンから外れた関節も拾える。
+    """
+    result: dict[str, tuple[float, float]] = {}
+    for element in ET.fromstring(xml).findall("joint"):
+        if element.attrib.get("type") not in {"revolute", "prismatic"}:
+            continue
+        limit = element.find("limit")
+        if limit is None:
+            continue
+        result[element.attrib["name"]] = (
+            float(limit.attrib["lower"]),
+            float(limit.attrib["upper"]),
+        )
+    return result
+
+
 def damped_least_squares(
     jacobian: np.ndarray,
     cartesian_velocity: np.ndarray,

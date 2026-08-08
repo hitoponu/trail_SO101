@@ -20,13 +20,28 @@
   速度ゼロにする)。**アームは止まらず、その姿勢で保持する**。
 
 ────────────────────────────────────────────────────────────────────────
+★ 指令目標は自前で保持する (実測値を読み直さない)
+────────────────────────────────────────────────────────────────────────
+このノードは自分が送った目標 (`_target`) を覚えていて、キー入力ごとに
+そこへ加算する。**`/joint_states` の実測値に足し込んではならない。**
+
+理由は保持力が弱いこと (全関節 `P=16`。docs/lekiwi_so101_reach.md の
+「既知の未解決事項」)。位置制御のトルクは概ね `P × 位置偏差`なので、
+目標に追い付いた関節は偏差ゼロ = トルクゼロになり、重力で下がる。
+実測値を読み直すと**その下がった値が次の目標に焼き込まれ**、どのキーを
+押しても shoulder_lift が下がり続ける (実際にそうなっていた)。
+
+代償として目標と実測はずれていく。ステータス行に実測値も出すので、
+ずれが大きければ **Space** で現在姿勢へ同期し直すこと。
+
+────────────────────────────────────────────────────────────────────────
 キー配置
 ────────────────────────────────────────────────────────────────────────
 ベース (teleop_twist_keyboard と同じ並び。★ オムニなので真横にも動ける)
 
     u  i  o        i / ,  前後       j / l  左右 (strafe)
     j  k  l        u / o  左前/右前   m / .  左後/右後
-    m  ,  .        k      停止        q / z  速度の増減
+    m  ,  .        k      停止        [ / ]  その場で旋回
 
 アーム (上段が +、下段が −)
 
@@ -34,7 +49,8 @@
     3 / e   elbow_flex         4 / r   wrist_flex
     5 / t   wrist_roll         6 / y   gripper (開 / 閉)
 
-    Space   アームを止める (いまの姿勢で保持)
+    Space   アームを現在姿勢で保持する (目標を実測値へ同期し直す)
+    ?       ヘルプ
     Ctrl+C  終了
 """
 
@@ -44,6 +60,7 @@ import sys
 import termios
 import threading
 import tty
+import xml.etree.ElementTree as ET
 
 import rclpy
 from builtin_interfaces.msg import Duration
@@ -52,8 +69,12 @@ from geometry_msgs.msg import Twist
 from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+from lekiwi_examples.cartesian_math import joint_limits_from_urdf
 
 # ベース: キー -> (vx, vy, wz) の向き。大きさは speed 側で決める。
 BASE_KEYS = {
@@ -109,8 +130,8 @@ class TeleopKeyboard(Node):
             "arm_step_duration": 0.20,
             # グリッパは 0.0-1.0 の正規化位置で送る。
             "gripper_step": 0.10,
-            # 可動域の端から残す余白 [rad]。URDF の値を直接は読まないので、
-            # ここは「送る目標をどこでクランプするか」だけを決める。
+            # 可動域の端から残す余白 [rad]。可動域そのものは /robot_description
+            # から読む (URDF が唯一の情報源。ここに数値を持つと必ず古くなる)。
             "joint_limit_margin": 0.10,
             "publish_rate": 20.0,
         }
@@ -141,11 +162,26 @@ class TeleopKeyboard(Node):
         # ★ /joint_states の publisher は 2 つ (車輪 / アーム) あるので、
         #   1 通では全関節が揃わない。辞書に蓄積する。
         self._positions: dict[str, float] = {}
-        self.create_subscription(JointState, "/joint_states", self._joint_state_cb, 10)
-
         self._twist = (0.0, 0.0, 0.0)
         self._lock = threading.Lock()
         self._gripper_target: float | None = None
+        # ★ 自分が送った目標。実測値ではない (モジュール冒頭の注意を読むこと)。
+        self._target: list[float] | None = None
+        self._limits: list[tuple[float, float]] | None = None
+
+        self.create_subscription(JointState, "/joint_states", self._joint_state_cb, 10)
+        # /robot_description は TRANSIENT_LOCAL / depth 1。あとから繋いでも
+        # 最後の 1 通が届く。
+        self.create_subscription(
+            String,
+            "/robot_description",
+            self._description_cb,
+            QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
+            ),
+        )
 
         self.create_timer(1.0 / float(param("publish_rate")), self._publish_twist)
 
@@ -155,9 +191,38 @@ class TeleopKeyboard(Node):
         with self._lock:
             self._positions.update(zip(message.name, message.position))
 
-    def _arm_ready(self) -> bool:
+    def _description_cb(self, message: String) -> None:
+        if self._limits is not None:
+            return
+        try:
+            table = joint_limits_from_urdf(message.data)
+            limits = [table[name] for name in self._joints]
+        except (KeyError, ET.ParseError, ValueError) as exc:
+            # クランプ無しでも動かせるので、落とさず警告だけにする。
+            self.get_logger().warning(
+                f"可動域を読めませんでした。クランプしません: {exc}"
+            )
+            return
         with self._lock:
-            return all(name in self._positions for name in self._joints)
+            self._limits = limits
+        self.get_logger().info("URDF から可動域を読みました")
+
+    def _sync_target(self) -> bool:
+        """実測値を目標として取り込む。まだ関節が揃っていなければ False。"""
+        with self._lock:
+            if not all(name in self._positions for name in self._joints):
+                return False
+            self._target = [self._positions[name] for name in self._joints]
+        return True
+
+    def _clamp(self, index: int, value: float) -> float:
+        if self._limits is None:
+            return value
+        lower, upper = self._limits[index]
+        lower, upper = lower + self._margin, upper - self._margin
+        if lower >= upper:  # 余白が可動域より広い。クランプしない。
+            return value
+        return min(upper, max(lower, value))
 
     # ── ベース ────────────────────────────────────────────────────────
 
@@ -177,12 +242,28 @@ class TeleopKeyboard(Node):
     # ── アーム ────────────────────────────────────────────────────────
 
     def nudge_joint(self, index: int, direction: float) -> str:
-        """1 関節だけを arm_step ぶん動かす目標を送る。"""
-        if not self._arm_ready():
+        """1 関節だけを arm_step ぶん動かす目標を送る。
+
+        ★ 加算するのは**前回送った目標**であって実測値ではない。理由は
+          モジュール冒頭の「指令目標は自前で保持する」を読むこと。
+        """
+        if self._target is None and not self._sync_target():
             return "関節状態を待っています（/joint_states）"
-        with self._lock:
-            target = [self._positions[name] for name in self._joints]
-        target[index] += direction * self._arm_step
+        assert self._target is not None
+        self._target[index] = self._clamp(
+            index, self._target[index] + direction * self._arm_step
+        )
+        return self._send_target(index)
+
+    def hold_arm(self) -> str:
+        """いまの実測姿勢を目標として送り直す（目標と実測のずれを解消する）。"""
+        if not self._sync_target():
+            return "関節状態を待っています"
+        return self._send_target(None)
+
+    def _send_target(self, index: int | None) -> str:
+        assert self._target is not None
+        target = list(self._target)
 
         message = JointTrajectory()
         message.header.stamp = self.get_clock().now().to_msg()
@@ -196,13 +277,16 @@ class TeleopKeyboard(Node):
         )
         message.points = [point]
         self._traj_pub.publish(message)
-        return f"{self._joints[index]} {direction * self._arm_step:+.3f} rad"
 
-    def hold_arm(self) -> str:
-        """いまの姿勢をそのまま目標として送り、動きを止める。"""
-        if not self._arm_ready():
-            return "関節状態を待っています"
-        return self.nudge_joint(0, 0.0)
+        if index is None:
+            return "アームを現在姿勢で保持（目標を実測値へ同期）"
+        # ★ 実測値も併記する。P=16 で保持力が弱いため目標と実測はずれる。
+        #   ずれが見えていないと「効いていない」と誤解する。
+        name = self._joints[index]
+        with self._lock:
+            actual = self._positions.get(name)
+        actual_text = "実測 --" if actual is None else f"実測 {actual:+.3f}"
+        return f"{name} 目標 {target[index]:+.3f} ({actual_text}) rad"
 
     def nudge_gripper(self, direction: float) -> str:
         if not self._gripper.server_is_ready():
@@ -234,6 +318,35 @@ def _read_key() -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def handle_key(node, key: str) -> str | None:
+    """1 文字を解釈してノードを操作し、ステータス行を返す。
+
+    None を返したら「表示するものは無い」(ヘルプを出したときなど)。
+
+    ★ 端末から切り離してあるのは**テストするため**。ここを main() に埋めて
+      いたせいでキー振り分けが一度も試験されていなかった。
+    """
+    if key in BASE_KEYS:
+        node.set_base(*BASE_KEYS[key])
+        return f"base {BASE_KEYS[key]}"
+    if key in BASE_TURN_KEYS:
+        node.set_base(0.0, 0.0, BASE_TURN_KEYS[key])
+        return f"turn {BASE_TURN_KEYS[key]:+.0f}"
+    if key in ARM_KEYS:
+        index, direction = ARM_KEYS[key]
+        return node.nudge_joint(index, direction)
+    if key in GRIPPER_KEYS:
+        return node.nudge_gripper(GRIPPER_KEYS[key])
+    if key == " ":
+        return node.hold_arm()
+    if key == "?":
+        print(HELP)
+        return None
+    # 知らないキーはベースを止める。暴走させないための既定動作。
+    node.set_base(0.0, 0.0, 0.0)
+    return "停止"
+
+
 def main() -> None:
     rclpy.init()
     node = TeleopKeyboard()
@@ -244,32 +357,14 @@ def main() -> None:
     spin.start()
 
     print(HELP)
-    status = ""
     try:
         while rclpy.ok():
             key = _read_key()
             if key == "\x03":  # Ctrl+C
                 break
-            if key in BASE_KEYS:
-                node.set_base(*BASE_KEYS[key])
-                status = f"base {BASE_KEYS[key]}"
-            elif key in BASE_TURN_KEYS:
-                node.set_base(0.0, 0.0, BASE_TURN_KEYS[key])
-                status = f"turn {BASE_TURN_KEYS[key]:+.0f}"
-            elif key in ARM_KEYS:
-                index, direction = ARM_KEYS[key]
-                status = node.nudge_joint(index, direction)
-            elif key in GRIPPER_KEYS:
-                status = node.nudge_gripper(GRIPPER_KEYS[key])
-            elif key == " ":
-                status = node.hold_arm()
-            elif key == "?":
-                print(HELP)
+            status = handle_key(node, key)
+            if status is None:
                 continue
-            else:
-                # 知らないキーはベースを止める。暴走させないための既定動作。
-                node.set_base(0.0, 0.0, 0.0)
-                status = "停止"
             print(f"\r{status:<60}", end="", flush=True)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
