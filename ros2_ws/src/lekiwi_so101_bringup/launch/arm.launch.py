@@ -4,8 +4,13 @@
 
   1. **結合ロボット全体**の robot_state_publisher (システム全体でこれ 1 つだけ)
   2. アーム側 (LeRobot ブリッジ + ros2_control + spawner) — follower.launch.py を include
-  3. リーチノード
-  4. RViz (システム全体でこれ 1 つだけ)
+  3. RViz (システム全体でこれ 1 つだけ)
+
+★ リーチと逆運動学はここでは起動しない。lekiwi_examples へ移した。
+  この launch (と robot.launch.py) はロボットを動かせる状態にするところまでで、
+  その上で何をするかはアプリケーション側の責任にする。
+
+      ros2 launch lekiwi_examples reach.launch.py     # 別ターミナルで
 
 ★ ベース側 (base_driver / scan_filter / slam_toolbox / Nav2) はここでは起動しない。
 
@@ -13,14 +18,13 @@
     うえでベースとカメラも起動するので、ロボット全体が 1 プロセスで上がる
     (docker/robot の統合イメージには nav2 も lekiwi_base_bringup も入っている)。
 
-  この launch がアーム側だけなのは、4 コンテナ構成 (docker/lekiwi_so101_bringup)
-  のアームのイメージにベース側の依存が入っていないため。その構成ではベースを
-  別コンテナで
+  この launch を単体で使うのは、**アームだけを切り分けて確認したいとき**。
+  ベース側が要るなら robot.launch.py を使うか、別途
 
       ros2 launch lekiwi_base_bringup nav.launch.py \
         start_robot_state_publisher:=false start_rviz:=false
 
-  として起動する。docker/lekiwi_so101_bringup/compose.yaml がそうしている。
+  を起動する (RSP はこの launch が唯一持つので false が要る)。
 
 ★ なぜ RSP をこちらが持つのか
   結合 URDF は lekiwi_description と so_arm101_description の両方を必要とし、
@@ -59,7 +63,6 @@ def generate_launch_description():
     start_rviz = LaunchConfiguration("start_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
     controllers_file = LaunchConfiguration("controllers_file")
-    reach_params_file = LaunchConfiguration("reach_params_file")
 
     mount_keys = ("x", "y", "z", "roll", "pitch", "yaw")
     wrist_camera = LaunchConfiguration("wrist_camera")
@@ -144,10 +147,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "controllers_file",
                 default_value=str(share / "config" / "ros2_controllers.yaml"),
-            ),
-            DeclareLaunchArgument(
-                "reach_params_file",
-                default_value=str(share / "config" / "reach.yaml"),
             ),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument(
@@ -243,14 +242,6 @@ def generate_launch_description():
                     "--frame-id", [wrist_camera_name, "_link"],
                     "--child-frame-id", [wrist_camera_name, "_depth_optical_frame"],
                 ],
-            ),
-            # ---- リーチ ----
-            Node(
-                package="so101_bringup",
-                executable="so101_reach_to_point",
-                name="so101_reach_to_point",
-                output="screen",
-                parameters=[reach_params_file, {"joint_prefix": joint_prefix}],
             ),
             # ---- システム全体で唯一の RViz ----
             Node(

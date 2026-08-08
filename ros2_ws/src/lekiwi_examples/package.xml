@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lekiwi_examples</name>
+  <version>0.1.0</version>
+  <description>
+    LeKiwi + SO-101 の**アプリケーション側**サンプル。
+    ロボット本体（ドライバ・ros2_control・Nav2・カメラ）は robot.launch.py が
+    起動する前提で、その上で動くプログラムだけを置く。
+
+    ★ ここに置くもの: 逆運動学、リーチ、キーボード操作。
+    ★ ここに置かないもの: ハードウェアに直接触るコード。
+      それは so101_bringup（アーム）と lekiwi_base_bringup（ベース）の担当。
+  </description>
+  <maintainer email="maintainer@example.com">maintainer</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>control_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>python3-numpy</depend>
+  <!-- キーボード入力。keyboard_input.py が使う -->
+  <depend>python3-pynput</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -292,7 +292,7 @@ CLI テストコマンドはすべてそちらにまとめてある（統合ス�
 | `docker/so101_ros2` | このスタックに吸収 |
 | `docker/realsense_ros2` | このスタックに吸収 |
 | `docker/lekiwi_so101_bringup`（4 コンテナ） | このスタックが置き換える |
-| `reach.launch.py` | `robot.launch.py` が include している（アーム側だけ動かしたいときは今も使える） |
+| `arm.launch.py` | `robot.launch.py` が include している（アーム側だけ動かしたいときは今も使える） |
 
 **旧ディレクトリは消していない。** 1 サブシステムだけを切り分けたいときに使う。
 ただし同時に起動しないこと（`make` の guard が止める）。

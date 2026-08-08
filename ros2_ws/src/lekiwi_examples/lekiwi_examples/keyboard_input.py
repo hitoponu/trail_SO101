@@ -8,7 +8,7 @@ import rclpy
 from geometry_msgs.msg import TwistStamped
 from rclpy.node import Node
 
-from so101_bringup.cartesian_math import KEY_DIRECTIONS, velocity_from_keys
+from lekiwi_examples.cartesian_math import KEY_DIRECTIONS, velocity_from_keys
 
 
 class KeyboardInput(Node):

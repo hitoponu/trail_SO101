@@ -15,10 +15,9 @@
 
 ```
 robot.launch.py
-├─ reach.launch.py            ← アーム側。RSP と RViz は「システム全体で 1 つ」
+├─ arm.launch.py            ← アーム側。RSP と RViz は「システム全体で 1 つ」
 │   ├─ robot_state_publisher  ← 結合 URDF（ベース + アーム + 手首カメラ）
 │   ├─ follower.launch.py     ← lerobot_bridge → ros2_control → spawner ×3
-│   ├─ so101_reach_to_point   ← リーチ
 │   └─ rviz2
 ├─ nav.launch.py              ← ベース側（sim:=true なら sim_nav.launch.py）
 │   ├─ base_driver            ← /cmd_vel → サーボ
@@ -27,6 +26,15 @@ robot.launch.py
 │   ├─ slam_toolbox           ← map → odom の TF と /map
 │   └─ Nav2 一式
 └─ d435i.launch.py            ← realsense2_camera（sim では起動しない）
+```
+
+★ **リーチと逆運動学はここに居ません。** `lekiwi_examples` に移してあり、
+別ターミナルで起動します。`robot.launch.py` は「ロボットを動かせる状態にする」
+ところまでで、その上で何をするかはアプリケーション側の責任です。
+
+```bash
+ros2 launch lekiwi_examples reach.launch.py      # map 上の点へリーチ
+ros2 run lekiwi_examples teleop_keyboard         # ベース + アームをキーボードで
 ```
 
 > ★ ベース側の include には `start_robot_state_publisher:=false` と

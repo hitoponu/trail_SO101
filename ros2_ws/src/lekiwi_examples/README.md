@@ -1,0 +1,162 @@
+# lekiwi_examples
+
+**ロボットの上で動かすサンプルプログラム。**
+
+`robot.launch.py` が**起動していることが前提**です。このパッケージのコードは
+ハードウェアに直接触らず、ROS のインターフェース（トピック / アクション / TF）
+だけを使います。
+
+```
+┌──────────────────────────────────────────────┐
+│ robot.launch.py                              │  ← ロボット本体
+│   ドライバ / ros2_control / SLAM / Nav2 / カメラ │    （別ターミナル）
+└──────────────────────────────────────────────┘
+                    ▲ ROS のインターフェースだけ
+┌──────────────────────────────────────────────┐
+│ lekiwi_examples                              │  ← ここ
+│   リーチ / 逆運動学 / キーボード操作             │
+└──────────────────────────────────────────────┘
+```
+
+**★ 自分のプログラムもここに置いてください。** 書き方は
+[`../../../docs/development.md`](../../../docs/development.md)。
+
+---
+
+## 使い方
+
+まず別ターミナルでロボットを起動しておきます。
+
+```bash
+# Linux PC（実機）
+cd docker/robot && make run BACKEND=lerobot ROBOT_ID=my_follower
+
+# 実機なし（Mac 可）
+cd docker/robot && make mock
+```
+
+以降はコンテナに入って叩きます。
+
+```bash
+cd docker/robot && make shell
+```
+
+### 1. リーチ — `map` 上の点へアームを伸ばす
+
+```bash
+# コンテナ内
+ros2 launch lekiwi_examples reach.launch.py
+```
+
+**RViz の "Publish Point" でクリックする**のがいちばん簡単です
+（★ Fixed Frame を `map` にすること）。トピックからも与えられます。
+
+```bash
+ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: 0.35, y: 0.05, z: 0.25}, orientation: {w: 1.0}}}'
+```
+
+結果は `/so101/reach_status` に 1 行ずつ出ます。
+
+```
+ACCEPTED   target=map(0.350,0.050,0.250) iters=9 residual=0.0044
+SUCCEEDED  residual_fk=0.0045
+```
+
+> ★ **届かない目標では警告して何もしません。** ベースは動かしません
+> （`/cmd_vel` の publisher を一切作らないことで構造的に保証しています）。
+>
+> ★ **精度は数 cm です。** 理由は
+> [`../../../docs/lekiwi_so101_reach.md`](../../../docs/lekiwi_so101_reach.md)。
+
+### 2. キーボード操作 — ベースとアームを同時に
+
+```bash
+# コンテナ内
+ros2 run lekiwi_examples teleop_keyboard
+```
+
+> ## ★ 先に車輪を浮かせてください
+>
+> `/cmd_vel` は Nav2 の `collision_monitor` より**下流**なので、
+> **衝突監視も加速度制限も効きません。**
+>
+> アームは可動域の内側でクランプしますが、**機体との干渉は見ていません**。
+> LiDAR やプレートに当たりえます。
+
+**ベース**（`teleop_twist_keyboard` と同じ並び。★ オムニなので真横にも動けます）
+
+```
+  u  i  o        i / ,   前後
+  j  k  l        j / l   左右（strafe）
+  m  ,  .        u/o/m/. 斜め
+                 k       停止
+                 [ / ]   その場で旋回
+```
+
+**アーム**（上段が +、下段が −。1 キーで 0.05 rad）
+
+```
+  1 / q   shoulder_pan      2 / w   shoulder_lift
+  3 / e   elbow_flex        4 / r   wrist_flex
+  5 / t   wrist_roll        6 / y   gripper（開 / 閉）
+
+  Space   アームを止める（いまの姿勢で保持）
+  ?       ヘルプ
+  Ctrl+C  終了
+```
+
+> ★ **キーを離すとベースは止まります**（`base_driver` の watchdog が 0.5 秒で
+> 速度ゼロにする）。**アームは止まらず、その姿勢で保持します。**
+
+### 3. デカルト座標でのジョグ（手先を XYZ で動かす）
+
+```bash
+# コンテナ内
+ros2 launch lekiwi_examples cartesian_teleop.launch.py
+```
+
+キー: `w`/`s` = ±x、`a`/`d` = ±y、`r`/`f` = ±z。
+逆運動学（DLS）で関節軌道に変換します。**関節ごとに動かしたいときは 2 を**
+使ってください。
+
+---
+
+## 中身
+
+| ファイル | 内容 |
+| --- | --- |
+| `cartesian_math.py` | 順運動学・ヤコビアン・**減衰最小二乗（DLS）**。ROS に依存しない |
+| `reach_solver.py` | DLS を**指令の前にオフラインで収束**させる。到達不能の判定 |
+| `reach_to_point.py` | リーチのノード。TF の鮮度チェック、ベース移動の監視、`/so101/stow` |
+| `teleop_keyboard.py` | ベース + アームのキーボード操作 |
+| `cartesian_jog.py` + `keyboard_input.py` | デカルト座標のジョグ（2 ノードで 1 組） |
+
+**★ `cartesian_math.py` と `reach_solver.py` は ROS を import しません。**
+だから実機もコンテナも無しで単体テストできます。
+
+```bash
+# コンテナ内 /ros2_ws/src/
+python3 -m pytest lekiwi_examples -q
+```
+
+---
+
+## なぜロボット本体と分けているか
+
+`robot.launch.py` は**ロボットを「動かせる状態」にするところまで**を担当し、
+その上で何をするかはこちらの責任にしています。
+
+- ロボットを起動しただけでは**アームは動きません**。何を動かすかは明示的に選ぶ
+- サンプルを差し替えても**ロボット側は再起動不要**
+- ハードウェアに触るコード（`so101_bringup` / `lekiwi_base_bringup`）と、
+  その上のロジックが混ざらない
+
+## 関連
+
+| 知りたいこと | どこ |
+| --- | --- |
+| ロボットの起動手順 | [`../../../README.md`](../../../README.md) |
+| Topic / Service / Action の一覧 | [`../../../docs/interfaces.md`](../../../docs/interfaces.md) |
+| リーチの仕組みと精度 | [`../../../docs/internals.md`](../../../docs/internals.md) |
+| 自分でノードを書く | [`../../../docs/development.md`](../../../docs/development.md) |

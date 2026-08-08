@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-# .../so101_bringup/test/conftest.py -> .../ros2_ws/src
+# .../lekiwi_examples/test/conftest.py -> .../ros2_ws/src
 SRC = Path(__file__).resolve().parents[2]
 COMBINED_XACRO = SRC / "lekiwi_so101_bringup" / "urdf" / "lekiwi_so101.urdf.xacro"
 

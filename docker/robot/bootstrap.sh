@@ -140,8 +140,12 @@ echo
 echo "== 静的検査 =="
 source install/setup.bash
 
-python3 -c "from so101_bringup import bridge_core, cartesian_jog, cartesian_math, \
-    keyboard_input, lerobot_backend, lerobot_bridge, reach_solver, reach_to_point"
+# so101_bringup はハードウェアに触る側だけ (ブリッジと較正)
+python3 -c "from so101_bringup import bridge_core, calibration_limits, \
+    lerobot_backend, lerobot_bridge"
+# lekiwi_examples はその上で動くアプリケーション側 (逆運動学・リーチ・操作)
+python3 -c "from lekiwi_examples import cartesian_jog, cartesian_math, keyboard_input, \
+    reach_solver, reach_to_point, teleop_keyboard"
 python3 -c "import lerobot; from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig"
 # ★ ベース側。統合により numpy が dpkg 版から pip の 2.2.6 に変わったので、
 #   import が通ることをここで毎回確かめる。
@@ -212,7 +216,9 @@ echo "  結合 URDF: OK"
 #   include 先のパッケージが見つからない・引数名を打ち間違えた、といった
 #   「起動して初めて分かる」種類の壊れをここで拾う。
 ros2 launch lekiwi_so101_bringup robot.launch.py --show-args > /dev/null
-ros2 launch lekiwi_so101_bringup reach.launch.py --show-args > /dev/null
+ros2 launch lekiwi_so101_bringup arm.launch.py --show-args > /dev/null
+ros2 launch lekiwi_examples reach.launch.py --show-args > /dev/null
+ros2 launch lekiwi_examples cartesian_teleop.launch.py --show-args > /dev/null
 echo "  launch の読み込み: OK"
 
 echo

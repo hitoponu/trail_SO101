@@ -203,7 +203,7 @@ make check      # map -> wrist_camera_depth_optical_frame の行を見る
 make down                     # モックを完全に落とす（★ TF の二重定義を防ぐ）
 docker compose -f compose.yaml up -d
 docker compose -f compose.yaml exec -it lekiwi-so101-arm /entrypoint.sh \
-  ros2 launch lekiwi_so101_bringup reach.launch.py \
+  ros2 launch lekiwi_so101_bringup arm.launch.py \
     backend:=lerobot robot_id:=<較正ID>
 ```
 

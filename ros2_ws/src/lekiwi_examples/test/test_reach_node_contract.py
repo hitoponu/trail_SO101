@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-MODULE = Path(__file__).resolve().parents[1] / "so101_bringup" / "reach_to_point.py"
+MODULE = Path(__file__).resolve().parents[1] / "lekiwi_examples" / "reach_to_point.py"
 
 
 @pytest.fixture(scope="module")

@@ -247,6 +247,16 @@ make release-wheels   # ホイールだけ止める（アームは落ちない�
 > カメラは URDF で `arm_gripper_link` に剛体固定されており、外部キャリブレーションは
 > 要りません。
 
+> ## ★ リーチは別途起動が必要です
+>
+> `robot.launch.py` は**ロボットを動かせる状態にするところまで**で、リーチは
+> 起動しません。"Publish Point" を使う前に、別ターミナルで:
+>
+> ```bash
+> cd docker/robot && make shell
+> ros2 launch lekiwi_examples reach.launch.py
+> ```
+
 ### リーチの結果を見る
 
 RViz には目標球しか出ません。**理由まで知りたいときは端末で流してください。**
@@ -299,6 +309,9 @@ $E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped 
 $E ros2 service call /so101/stow std_srvs/srv/Trigger '{}'
 ```
 
+> ★ **リーチのノードは別途起動が必要です**（`ros2 launch lekiwi_examples reach.launch.py`）。
+> `/clicked_point` と `/so101/reach_target` はそのノードが購読します。
+>
 > ★ **届かない目標は「警告して何もしない」**のが仕様です。ベースは動きません。
 > 到達不能かどうかは**指令を出す前にオフラインで判定**しています。
 
@@ -394,6 +407,16 @@ ros2 run my_first_pkg hello
 ノードの書き方、QoS の罠、テストの書き方、つまずきポイント集は
 **[`docs/development.md`](docs/development.md)** にまとめてあります。
 
+**動くサンプルは [`ros2_ws/src/lekiwi_examples/`](ros2_ws/src/lekiwi_examples/)**
+にあります（リーチ / 逆運動学 / キーボード操作）。自分のプログラムもここに
+置いてください。
+
+```bash
+# コンテナ内。ロボットが起動している状態で
+ros2 launch lekiwi_examples reach.launch.py      # map 上の点へリーチ
+ros2 run lekiwi_examples teleop_keyboard         # ベース + アームをキーボードで
+```
+
 ---
 
 ## この機体の構成
@@ -442,7 +465,8 @@ trail_SO101/
 │   ├── rplidar_ros2/
 │   └── realsense_ros2/
 ├── ros2_ws/src/
-│   ├── so101_bringup/          アーム。LeRobot ブリッジ、リーチ、逆運動学
+│   ├── lekiwi_examples/        ★ ロボットの上で動くもの。リーチ、IK、キーボード操作
+│   ├── so101_bringup/          アーム。LeRobot ブリッジ、較正（ハードウェアに触る側）
 │   ├── lekiwi_base_bringup/    ベース。ドライバ、オドメトリ、スキャン処理
 │   ├── lekiwi_so101_bringup/   合成のみ。結合 URDF、robot.launch.py、release_all
 │   ├── lekiwi_description/     ベースの URDF

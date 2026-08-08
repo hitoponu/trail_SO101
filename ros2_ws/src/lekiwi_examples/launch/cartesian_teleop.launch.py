@@ -1,4 +1,16 @@
-"""Start the opt-in SO-101 XYZ keyboard teleoperation nodes."""
+"""アームの手先をデカルト座標 (XYZ) でジョグする。
+
+    # ① 別ターミナルでロボットを起動しておく
+    ros2 launch lekiwi_so101_bringup robot.launch.py backend:=lerobot robot_id:=my_follower
+
+    # ② こちらを起動する
+    ros2 launch lekiwi_examples cartesian_teleop.launch.py
+
+キー: w/s = +x/-x, a/d = +y/-y, r/f = +z/-z
+
+★ 関節ごとに動かしたいときは `ros2 run lekiwi_examples teleop_keyboard`。
+  あちらはベースも同時に操作できる。
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
@@ -16,12 +28,14 @@ def generate_launch_description():
     joint_limit_margin = LaunchConfiguration("joint_limit_margin")
     command_timeout = LaunchConfiguration("command_timeout")
     damping = LaunchConfiguration("damping")
+    joint_prefix = LaunchConfiguration("joint_prefix")
 
     jog = Node(
-        package="so101_bringup",
-        executable="so101_cartesian_jog",
+        package="lekiwi_examples",
+        executable="cartesian_jog",
         output="screen",
         parameters=[{
+            "joint_prefix": joint_prefix,
             "control_rate": control_rate,
             "trajectory_horizon": trajectory_horizon,
             "max_joint_velocity": max_joint_velocity,
@@ -31,13 +45,16 @@ def generate_launch_description():
         }],
     )
     keyboard = Node(
-        package="so101_bringup",
-        executable="so101_keyboard_input",
+        package="lekiwi_examples",
+        executable="cartesian_keyboard",
         output="screen",
         parameters=[{"linear_speed": linear_speed, "publish_rate": control_rate}],
     )
 
     return LaunchDescription([
+        # ★ 結合ロボット (robot.launch.py) では関節名に arm_ が付く。
+        #   アーム単体 (arm.launch.py を joint_prefix:="" で起動) なら空にする。
+        DeclareLaunchArgument("joint_prefix", default_value="arm_"),
         DeclareLaunchArgument("linear_speed", default_value="0.02"),
         DeclareLaunchArgument("control_rate", default_value="20.0"),
         DeclareLaunchArgument("trajectory_horizon", default_value="0.10"),

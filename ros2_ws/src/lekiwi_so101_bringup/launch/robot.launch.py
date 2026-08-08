@@ -13,9 +13,8 @@
 ────────────────────────────────────────────────────────────────────────
 起動するもの
 ────────────────────────────────────────────────────────────────────────
-    robot_state_publisher (結合 URDF。システム全体でこれ 1 つ)  ┐
-    LeRobot ブリッジ + ros2_control + spawner                   │ reach.launch.py
-    so101_reach_to_point                                        │ を include
+    robot_state_publisher (結合 URDF。システム全体でこれ 1 つ)  ┐ arm.launch.py
+    LeRobot ブリッジ + ros2_control + spawner                   │ を include
     RViz (システム全体でこれ 1 つ)                              ┘
 
     base_driver + scan_filter                                   ┐ nav.launch.py /
@@ -24,11 +23,17 @@
 
     realsense2_camera (手首カメラ)                                d435i.launch.py
 
-★ reach.launch.py との違い
-  reach.launch.py は**アーム側だけ**。ベースは別コンテナで動かす前提だった
-  (アームのイメージに nav2 も lekiwi_base_bringup も入っていなかったため)。
-  docker/robot の統合イメージには全部入っているので、この launch が全部を持つ。
-  reach.launch.py は 4 コンテナ構成 (docker/lekiwi_so101_bringup) 用に残してある。
+★ arm.launch.py との違い
+  arm.launch.py は**アーム側だけ** (RSP + ブリッジ + ros2_control + RViz)。
+  この launch がそれを include したうえでベース・LiDAR・カメラも起動する。
+  アームだけを切り分けて確認したいときは arm.launch.py を直接使える。
+
+★ リーチと逆運動学は起動しない。lekiwi_examples へ移した。
+  この launch はロボットを「動かせる状態」にするところまでで、その上で
+  何をするかはアプリケーション側の責任にする。別ターミナルで:
+
+      ros2 launch lekiwi_examples reach.launch.py      # map 上の点へリーチ
+      ros2 run lekiwi_examples teleop_keyboard         # キーボード操作
 
 ★ 停止
   この launch を Ctrl+C する。アームのトルクが切れて落ちるので、先に
@@ -173,12 +178,12 @@ def generate_launch_description():
         DeclareLaunchArgument("mock_wrist_camera_optical", default_value="false"),
 
         # ───────── アーム + RSP + リーチ + RViz ─────────
-        # ★ reach.launch.py がシステム全体で唯一の robot_state_publisher と
+        # ★ arm.launch.py がシステム全体で唯一の robot_state_publisher と
         #   RViz を持つ。ベース側の include には
         #   start_robot_state_publisher:=false / start_rviz:=false を渡すこと。
         GroupAction(actions=[
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(str(share / "launch" / "reach.launch.py")),
+                PythonLaunchDescriptionSource(str(share / "launch" / "arm.launch.py")),
                 launch_arguments=[
                     ("backend", backend),
                     ("robot_id", robot_id),

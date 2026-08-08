@@ -15,7 +15,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from so101_bringup.cartesian_math import (
+from lekiwi_examples.cartesian_math import (
     ARM_JOINTS,
     BASE_LINK,
     CONTROLLED_JOINTS,

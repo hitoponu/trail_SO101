@@ -1,6 +1,6 @@
 import numpy as np
 
-from so101_bringup.cartesian_math import (
+from lekiwi_examples.cartesian_math import (
     SerialChain,
     arm_target,
     bounded_target,

@@ -8,8 +8,8 @@ the suite still runs on a machine without ROS.
 import numpy as np
 import pytest
 
-from so101_bringup.cartesian_math import ARM_JOINTS, CONTROLLED_JOINTS, SerialChain, prefixed
-from so101_bringup.reach_solver import (
+from lekiwi_examples.cartesian_math import ARM_JOINTS, CONTROLLED_JOINTS, SerialChain, prefixed
+from lekiwi_examples.reach_solver import (
     ITERATION_LIMIT,
     SOLVED,
     STALLED,
