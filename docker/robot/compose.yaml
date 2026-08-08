@@ -48,21 +48,17 @@ services:
     #   特権で動くことになる (承知のうえ)。
     privileged: true
 
-    # ★ privileged: true があると Docker は下の devices: を**無視する**
-    #   (特権コンテナは最初から全デバイスにアクセスできる)。実測で確認:
-    #     privileged 有り + 存在しないデバイス -> 起動する (exit 0)
-    #     privileged 無し + 存在しないデバイス -> "error gathering device
-    #                                             information" で起動しない
-    #   つまりこの一覧は「どのデバイスを使うか」の**ドキュメント**として効いており、
-    #   デバイスが 1 つ欠けても make release は起動できる (緊急用の経路として重要)。
+    # ★ シリアル3本は devices: ではなく bind mount で渡す。
     #
-    #   ★ もし privileged を外すなら、この一覧は途端に**強い前提**に変わる。
-    #     アームの電源を切って /dev/so101_follower が消えた状態では
-    #     コンテナが起動できなくなり、ホイールを止めに行けなくなる。
-    devices:
-      - ${LEKIWI_DEVICE:-/dev/lekiwi}:${LEKIWI_DEVICE:-/dev/lekiwi}
-      - ${RPLIDAR_DEVICE:-/dev/rplidar}:${RPLIDAR_DEVICE:-/dev/rplidar}
-      - ${SO101_DEVICE:-/dev/so101_follower}:${SO101_DEVICE:-/dev/so101_follower}
+    # 分割構成 (docker/lekiwi_so101_bringup) では、シリアル用コンテナが
+    # 非 privileged なので devices: の名前付き割り当てがそのまま機能する。
+    # しかしこのコンテナは RealSense のため privileged であり、Docker は
+    # devices: の宛先を /dev の devtmpfs に作らない。その結果、ホストに
+    # /dev/so101_follower があっても、コンテナ内の同名パスが欠落する。
+    #
+    # bind mount は udev のシンボリックリンクをホスト側で解決してから
+    # 宛先のデバイスノードを作るため、既存構成と同じパスをコンテナ内で
+    # 利用できる。privileged と /dev/bus/usb は RealSense 用に残す。
     group_add:
       - ${DIALOUT_GID:-20}
 
@@ -97,6 +93,11 @@ services:
       WRIST_CAMERA_YAW: ${WRIST_CAMERA_YAW:-}
 
     volumes:
+      # privileged コンテナでは devices: の /dev 宛先が作られないため、
+      # シリアルは bind mount で既存の安定名をそのまま渡す。
+      - ${LEKIWI_DEVICE:-/dev/lekiwi}:${LEKIWI_DEVICE:-/dev/lekiwi}
+      - ${RPLIDAR_DEVICE:-/dev/rplidar}:${RPLIDAR_DEVICE:-/dev/rplidar}
+      - ${SO101_DEVICE:-/dev/so101_follower}:${SO101_DEVICE:-/dev/so101_follower}
       # ★ ROS ワークスペースはホストからマウントする。イメージにパッケージを
       #   焼き込まないので、lekiwi_description も so_arm101_description も
       #   ここから解決される。初回とパッケージ追加時は make bootstrap。
