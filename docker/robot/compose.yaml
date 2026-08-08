@@ -92,6 +92,7 @@ services:
       WRIST_CAMERA_PARENT: ${WRIST_CAMERA_PARENT:-gripper_link}
       WRIST_CAMERA_FPS: ${WRIST_CAMERA_FPS:-6}
       WRIST_CAMERA_DECIMATION: ${WRIST_CAMERA_DECIMATION:-2}
+      WRIST_CAMERA_RECONNECT_TIMEOUT: ${WRIST_CAMERA_RECONNECT_TIMEOUT:-6.0}
       # ★ 空文字は「指定なし」= URDF の既定値を使う、という意味。
       #   実測したら .env に書く。数値をここに書かないこと (URDF と二重管理になる)。
       WRIST_CAMERA_X: ${WRIST_CAMERA_X:-}

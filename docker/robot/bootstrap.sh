@@ -75,6 +75,26 @@ for repo in "$UPSTREAM"/*/; do
   fi
 done
 
+# CMakeCache.txt は CMake の絶対パスを保持する。
+#
+# 以前のイメージでビルドした成果物をホスト側に残したまま UV/venv の
+# イメージへ切り替えると、キャッシュ内の CMAKE_COMMAND が例えば
+# /usr/local/lib/python3.12/dist-packages/cmake/data/bin/cmake のような、
+# 現在のコンテナに存在しないパスを指すことがある。すると colcon が
+# 再ビルド時にその古いパスを Makefile から呼び出して停止する。
+# そのパッケージだけ build/install を捨てて、現在の cmake で生成し直す。
+while IFS= read -r -d '' cache; do
+  pkg_build="${cache%/CMakeCache.txt}"
+  pkg="$(basename "$pkg_build")"
+  cmake_command="$(sed -n 's/^CMAKE_COMMAND:INTERNAL=//p' "$cache" | head -n 1)"
+  if [[ -n "$cmake_command" && ! -x "$cmake_command" ]]; then
+    echo
+    echo "== $pkg の古い CMake キャッシュを作り直します =="
+    echo "   使用できない CMAKE_COMMAND: $cmake_command"
+    rm -rf "$pkg_build" "install/$pkg"
+  fi
+done < <(find build -mindepth 2 -maxdepth 2 -name CMakeCache.txt -print0)
+
 # --symlink-install の成果物には src を指すシンボリックリンクが残る。
 # データファイルを消したりブランチを切り替えたりすると、リンク先が消えて
 # 「壊れたリンク」になり、setuptools が存在しないファイルをコピーしようとして

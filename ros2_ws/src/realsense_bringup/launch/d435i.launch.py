@@ -38,6 +38,7 @@ def generate_launch_description():
     decimation = LaunchConfiguration("decimation")
     temporal_filter = LaunchConfiguration("temporal_filter")
     spatial_filter = LaunchConfiguration("spatial_filter")
+    reconnect_timeout = LaunchConfiguration("reconnect_timeout")
     start_rviz = LaunchConfiguration("start_rviz")
 
     rviz_config = str(
@@ -101,14 +102,23 @@ def generate_launch_description():
                         "動作中に有効だと過去フレームを混ぜて深度を引きずる",
         ),
         DeclareLaunchArgument("spatial_filter", default_value="false"),
+        DeclareLaunchArgument(
+            "reconnect_timeout",
+            default_value="6.0",
+            description=(
+                "デバイス切断後、次の再接続試行まで待つ秒数。"
+                "V4L2の切断エラーを高速再試行しないための間隔"
+            ),
+        ),
         DeclareLaunchArgument("start_rviz", default_value="true"),
 
         Node(
-            package="realsense2_camera",
-            executable="realsense2_camera_node",
+            package="realsense_bringup",
+            executable="realsense_camera_watchdog.py",
             name=camera_name,
             namespace=camera_namespace,
             output="screen",
+            arguments=["--watchdog-restart-delay", reconnect_timeout],
             parameters=[{
                 # ★ これが無いと TF のフレーム名が camera_link のまま動かない。
                 #   name=/namespace= はトピックにしか効かず、フレーム名は
@@ -117,6 +127,9 @@ def generate_launch_description():
                 #   「トピックは env_camera なのに TF は camera_link」という
                 #   追跡困難な状態を防ぐ。
                 "camera_name": camera_name,
+                # デバイス切断後の再接続試行間隔。明示的に渡して、
+                # realsense2_camera の既定値に依存しないようにする。
+                "reconnect_timeout": reconnect_timeout,
 
                 "enable_color": True,
                 "enable_depth": True,

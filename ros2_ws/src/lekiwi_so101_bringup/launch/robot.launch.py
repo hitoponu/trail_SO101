@@ -85,6 +85,9 @@ def generate_launch_description():
     wrist_camera_parent = LaunchConfiguration("wrist_camera_parent")
     wrist_camera_fps = LaunchConfiguration("wrist_camera_fps")
     wrist_camera_decimation = LaunchConfiguration("wrist_camera_decimation")
+    wrist_camera_reconnect_timeout = LaunchConfiguration(
+        "wrist_camera_reconnect_timeout"
+    )
     mock_wrist_camera_optical = LaunchConfiguration("mock_wrist_camera_optical")
 
     # ベース側 3 通りの排他条件。
@@ -158,6 +161,13 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "wrist_camera_decimation",
             default_value=os.environ.get("WRIST_CAMERA_DECIMATION", "2")),
+        DeclareLaunchArgument(
+            "wrist_camera_reconnect_timeout",
+            default_value=os.environ.get(
+                "WRIST_CAMERA_RECONNECT_TIMEOUT", "6.0"
+            ),
+            description="RealSense切断後の再接続試行間隔 [s]",
+        ),
         # ★ 実機では realsense2_camera がこの TF を出すので起動しないこと。
         #   sim:=true でカメラ実機が無いときだけ true にする。
         DeclareLaunchArgument("mock_wrist_camera_optical", default_value="false"),
@@ -260,6 +270,7 @@ def generate_launch_description():
                         ("depth_fps", wrist_camera_fps),
                         ("color_fps", wrist_camera_fps),
                         ("decimation", wrist_camera_decimation),
+                        ("reconnect_timeout", wrist_camera_reconnect_timeout),
                         ("start_rviz", "false"),
                     ],
                 ),
