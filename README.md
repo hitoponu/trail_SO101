@@ -8,12 +8,12 @@ lerobot で動かすリポジトリです。SLAM で地図を作り、Nav2 で�
 
 ## 目次
 
-1. [マシンの分担を理解する](#1-マシンの分担を理解する) ← ★ 最初に読む
-2. [リポジトリを取得する](#2-リポジトリを取得する)
-3. [Docker イメージをビルドする](#3-docker-イメージをビルドする)（初回のみ・時間がかかります）
-4. [ワークスペースを初期化する](#4-ワークスペースを初期化する)（初回とパッケージ追加時）
-5. [実機なしで動かす](#5-実機なしで動かす)（Mac でも動きます）
-6. [実機で動かす](#6-実機で動かす)（★ 安全上の注意）
+1. [リポジトリを取得する](#1-リポジトリを取得する)
+2. [Docker イメージをビルドする](#2-docker-イメージをビルドする)（初回のみ・時間がかかります）
+3. [ワークスペースを初期化する](#3-ワークスペースを初期化する)（初回とパッケージ追加時）
+4. [起動する](#4-起動する)（★ 安全上の注意）
+5. [RViz で動かす](#5-rviz-で動かす)
+6. [サブシステム別の Topic / Service / Action](#6-サブシステム別の-topic--service--action)
 7. [自分でノードを書く](#7-自分でノードを書く)
 
 - [リポジトリ構成](#リポジトリ構成)
@@ -21,26 +21,7 @@ lerobot で動かすリポジトリです。SLAM で地図を作り、Nav2 で�
 
 ---
 
-## 1. マシンの分担を理解する
-
-**★ ここを飛ばすと必ず混乱します。**
-
-| マシン | 役割 | ハードウェア |
-| --- | --- | --- |
-| **Mac**（開発機） | 設計・実装・**モック検証**・コミット | **無し。** Docker にシリアルデバイスを渡せません |
-| **Linux PC**（`hsr-pc5`） | **実機検証のみ** | SO-101 アーム、LeKiwi ベース、RPLIDAR、RealSense |
-
-**実機に触れるのは Linux PC だけです。** Mac 側は手順 5 までしか実行できません。
-
-以降、コードブロックの先頭に**どこで実行するか**を書いてあります。
-
-```bash
-# Mac（開発機）          ← ホストのターミナル
-# Linux PC（実機）        ← ホストのターミナル
-# コンテナ内 /ros2_ws/    ← docker compose exec で入った中
-```
-
-### この機体の構成
+## この機体の構成
 
 ```
         map (slam_toolbox が出す)
@@ -53,45 +34,43 @@ lerobot で動かすリポジトリです。SLAM で地図を作り、Nav2 で�
                                        └ wrist_camera_link       ← RealSense D435i
 ```
 
-| 部位 | モータ | 電圧 | ポート |
-| --- | --- | --- | --- |
-| アーム | Feetech STS3215 × 6（ID 1–6） | **7.4V** | `/dev/so101_follower` |
-| ホイール | Feetech STS3215 × 3（ID 7/8/9） | **12V** | `/dev/lekiwi` |
-| LiDAR | RPLIDAR A1M8 | — | `/dev/rplidar` |
+| サブシステム | ハードウェア | ポート |
+| --- | --- | --- |
+| **アーム** | Feetech STS3215 × 6（ID 1–6）、**7.4V** | `/dev/so101_follower` |
+| **ベース** | Feetech STS3215 × 3（ID 7/8/9）、**12V**、3輪オムニ | `/dev/lekiwi` |
+| **LiDAR** | RPLIDAR A1M8 | `/dev/rplidar` |
+| **RealSense** | D435i（アームの手首に載せる） | USB |
 
 > ★ **アームとホイールを同じシリアルバスに繋がないこと。**
 > どちらも STS3215 の 1 Mbps で ID も分かれているため**物理的には繋がってしまい**、
 > 繋いだ瞬間に 12V が 7.4V のアームサーボに掛かって壊れます。
 
+> ★ **実機を繋げるのは Linux だけです。** macOS の Docker はシリアル / USB
+> デバイスをコンテナへ渡せません。Mac では `make mock`（実機に触れない構成）
+> までしか実行できません。
+
 ---
 
-## 2. リポジトリを取得する
+## 1. リポジトリを取得する
 
 ```bash
-# Mac（開発機） / Linux PC（実機） どちらも
 git clone git@github.com:hitoponu/trail_SO101.git
 cd trail_SO101
+git switch feat/single-container
 ```
-
-**ブランチを確認してください。** 機能ごとに分かれています。
 
 | ブランチ | 内容 |
 | --- | --- |
 | `main` | 統合済みの安定版 |
 | `feat/single-container` | **統合スタック（`docker/robot`）。ふだんはこれ** |
 
-```bash
-git switch feat/single-container
-```
-
 ---
 
-## 3. Docker イメージをビルドする
+## 2. Docker イメージをビルドする
 
 **初回のみ。20〜40 分かかります**（約 7.9GB）。
 
 ```bash
-# Mac（開発機） / Linux PC（実機）
 cd docker/robot
 cp .env.example .env
 make build
@@ -100,7 +79,6 @@ make build
 **★ `.env` はここで実機に合わせて編集してください（後回しにしない）。**
 
 ```bash
-# Linux PC（実機）
 getent group dialout        # 出力の3番目の数字が DIALOUT_GID
 ls -l /dev/lekiwi /dev/so101_follower /dev/rplidar    # 3つとも見えること
 ```
@@ -117,12 +95,11 @@ docker images | grep lekiwi-so101
 
 ---
 
-## 4. ワークスペースを初期化する
+## 3. ワークスペースを初期化する
 
-**★ これを飛ばすと手順 5 が必ず失敗します。**
+**★ これを飛ばすと起動が必ず失敗します。**
 
 ```bash
-# Mac（開発機） / Linux PC（実機）
 cd docker/robot
 make bootstrap
 ```
@@ -154,78 +131,7 @@ Summary: 9 packages finished
 
 ---
 
-## 5. 実機なしで動かす
-
-**Mac でも動きます。シリアルも USB も一切開きません。**
-
-```bash
-# Mac（開発機） / Linux PC（実機）
-cd docker/robot
-make mock          # 前面で走ります。この端末は開いたままに
-```
-
-別のターミナルで健全性を確認します。
-
-```bash
-# Mac（開発機） / Linux PC（実機）
-cd docker/robot
-make check
-```
-
-**こう出れば成功です。**
-
-```
---- /robot_description (期待: 1) ---
-Publisher count: 1
---- /joint_states (期待: 2) ---
-Publisher count: 2
---- controllers (期待: active 3 つ) ---
-gripper_controller           ... active
-joint_trajectory_controller  ... active
-joint_state_broadcaster      ... active
---- ★ nav2 と ros2_control の action が同時に見えること ---
-/joint_trajectory_controller/follow_joint_trajectory
-/navigate_to_pose
---- map -> arm_gripper_frame_link ---
-- Translation: [0.471, -0.000, 0.315]
-```
-
-> ★ 最後の TF の数値は**アームの姿勢によって変わります**。合格条件は
-> 「`★ ... が引けない` ではなく数値が出ること」です。
-> 上の値は全関節ゼロのときのものです。
-
-### 動かしてみる
-
-```bash
-# コンテナ内。まず入る
-docker compose -f compose.mock.yaml exec -it robot-mock bash
-```
-
-```bash
-# コンテナ内 /ros2_ws/
-# ① リーチの結果を流しておく
-ros2 topic echo /so101/reach_status &
-
-# ② map 上の点へアームを伸ばす
-ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped \
-  '{header: {frame_id: map}, pose: {position: {x: 0.35, y: 0.05, z: 0.25}, orientation: {w: 1.0}}}'
-#    -> ACCEPTED ... -> SUCCEEDED
-
-# ③ ナビゲーションのゴールを与える
-ros2 action send_goal -f /navigate_to_pose nav2_msgs/action/NavigateToPose \
-  '{pose: {header: {frame_id: map}, pose: {position: {x: 0.8, y: 0.3}, orientation: {w: 1.0}}}}'
-```
-
-**停止**は `make mock` の端末で `Ctrl+C` → `make down`。
-
-> ★ **モックで確認できないこと**: サーボのトルクと PID、実オドメトリの滑り、
-> 実スキャンの形、USB の列挙、12V/7.4V の分離、干渉、RealSense の点群。
-
-他に何が叩けるかは [`docs/interfaces.md`](docs/interfaces.md) にあります。
-
----
-
-## 6. 実機で動かす
+## 4. 起動する
 
 > ## ★ 先に読んでください
 >
@@ -244,7 +150,6 @@ ros2 action send_goal -f /navigate_to_pose nav2_msgs/action/NavigateToPose \
 > 電源スイッチに手が届くか / 車輪を浮かせるか**。
 
 ```bash
-# Linux PC（実機）
 cd docker/robot
 make run BACKEND=lerobot ROBOT_ID=my_follower
 ```
@@ -252,14 +157,27 @@ make run BACKEND=lerobot ROBOT_ID=my_follower
 `ROBOT_ID` は LeRobot の較正 ID です。実物はここで確認できます。
 
 ```bash
-# Linux PC（実機）
 ls ~/.cache/huggingface/lerobot/calibration/robots/so_follower/
 ```
+
+RViz が上がります。別ターミナルで健全性を確認してください。
+
+```bash
+cd docker/robot
+make check
+```
+
+`/robot_description` = **1**、`/joint_states` = **2**、コントローラ 3 つが `active`、
+`/navigate_to_pose` と `follow_joint_trajectory` が**両方**見えれば正常です。
+
+> ★ 実機が無い環境（Mac など）では `make mock` で同じ launch を
+> `sim:=true backend:=mock` で起動できます。シリアルも USB も開きません。
+> ROS グラフ・TF・リーチのソルバ・SLAM/Nav2 はそのまま検証できます。
 
 ### 停止手順（★ 順番を守ること）
 
 ```bash
-# ① Linux PC（実機）— 別ターミナル
+# ① 別ターミナル
 cd docker/robot && make stow      # アームを低く畳む
 
 # ② 人がアームを支える
@@ -268,18 +186,16 @@ cd docker/robot && make stow      # アームを低く畳む
 
 # ④ アームが静止してから手を放す
 
-# ⑤ Linux PC（実機）
+# ⑤ コンテナを片付ける
 make down
 ```
 
-### 異常終了したとき（SIGKILL / OOM / コンテナ強制削除）
+### 異常終了したとき（launch が落ちた / SIGKILL / OOM）
 
 停止処理が走らなかった場合、**サーボは指令を保持したままです。**
-
 **★ コンテナを落とす必要はありません。** 止まっている必要があるのは launch だけです。
 
 ```bash
-# Linux PC（実機）
 cd docker/robot
 make release-check    # 読むだけ。いまトルクが入っているか確認
 make release          # ★ アームもホイールもこれ 1 つで解放（★ アームが落ちます）
@@ -291,34 +207,175 @@ make release-wheels   # ホイールだけ止める（アームは落ちない�
 
 詳細は [`docker/robot/README.md`](docker/robot/README.md)。
 
-### 保存した地図で走る
+---
 
-SLAM で走り回ったあと、地図を保存できます。
+## 5. RViz で動かす
+
+**いちばん簡単な入口です。** `make run` で RViz が一緒に上がります
+（設定は `lekiwi_so101_bringup/rviz/reach.rviz`）。
+
+> ★ **Fixed Frame は `map` にしてください。** ツールは Fixed Frame の座標で
+> publish するので、`odom` のままだとリーチが `REJECTED_WRONG_FRAME` で弾かれます。
+> 既定は `map` です。
+
+### ツール（上部のツールバー）
+
+| ツール | 出すもの | 何が起きるか |
+| --- | --- | --- |
+| **Publish Point** | `/clicked_point` | **クリックした点へアームを伸ばす**。シングルクリックで発火 |
+| **2D Goal Pose** | `/goal_pose` | **その姿勢へ走る**（Nav2） |
+| **2D Pose Estimate** | `/initialpose` | AMCL の初期姿勢。★ **保存地図構成（`use_saved_map:=true`）のときだけ**意味があります |
+
+> ★ **"Publish Point" と "2D Goal Pose" は別物です。** 前者は `PointStamped`、
+> 後者は `PoseStamped` で、型も宛先も違います。アームを動かすのは前者です。
+
+### 表示（Displays パネル）
+
+| 表示名 | トピック | 既定 |
+| --- | --- | --- |
+| RobotModel | `/robot_description` | ON |
+| TF | — | ON |
+| Map | `/map` | ON |
+| Scan (filtered) | `/scan_filtered` | ON |
+| Global Plan | `/plan` | ON |
+| Optimal Trajectory (MPPI) | `/optimal_trajectory` | ON |
+| Footprint | `/local_costmap/published_footprint` | ON |
+| Reach Target | `/so101/reach_markers` | ON（**緑 = 受理 / 赤 = 棄却**） |
+| Global / Local Costmap | `/*_costmap/costmap` | **OFF**（必要なときだけ ON） |
+| Wrist Camera Cloud | `/wrist_camera/wrist_camera/depth/color/points` | **OFF** |
+| Wrist Camera（軸） | `wrist_camera_link` | **OFF** |
+
+> ★ **Wrist Camera Cloud は既定 OFF です。** `realsense2_camera` は購読者が
+> ゼロなら点群の生成自体をスキップするので、切っている間はコストがゼロです。
+> 見たいときだけ ON にしてください。
+>
+> ★ 点群は Fixed Frame が `map` なので**自動的に `map` 上の正しい位置に出ます**。
+> カメラは URDF で `arm_gripper_link` に剛体固定されており、外部キャリブレーションは
+> 要りません。
+
+### リーチの結果を見る
+
+RViz には目標球しか出ません。**理由まで知りたいときは端末で流してください。**
 
 ```bash
-# Linux PC（実機）— 別ターミナル
-cd docker/robot
-make save-map MAP_NAME=my_room       # -> $MAP_DIR/my_room.yaml と .pgm
+docker compose -f compose.yaml exec robot /entrypoint.sh \
+  ros2 topic echo /so101/reach_status
 ```
 
-> ★ **`make save-map` は実機構成でしか動きません。** `map_saver_server` を
-> 起動しているのは `nav.launch.py`（実機）だけで、`sim_nav.launch.py`（`sim:=true`）
-> には入っていません。
+```
+ACCEPTED   target=map(0.350,0.050,0.250) ... residual=0.0042
+SUCCEEDED  residual_fk=0.0042
+REJECTED_OUT_OF_RANGE range=1.963m > max_reach_radius=0.55m
+```
 
-次回からは SLAM の代わりに保存地図 + AMCL で走れます。`make run` は
-この引数を渡さないので、launch を直接叩きます。
+状態コードの一覧は [`docs/interfaces.md`](docs/interfaces.md#リーチの状態メッセージ)。
+
+---
+
+## 6. サブシステム別の Topic / Service / Action
+
+**よく使うものだけ**を挙げます。全部の一覧と CLI テストコマンドは
+**[`docs/interfaces.md`](docs/interfaces.md)** にあります。
+
+以降 `$E` は次の前置きです（`docker exec` は ENTRYPOINT を通らないので必須）。
 
 ```bash
-# Linux PC（実機）
-make up
-docker compose -f compose.yaml exec -it robot /entrypoint.sh \
-  ros2 launch lekiwi_so101_bringup robot.launch.py \
-    backend:=lerobot robot_id:=my_follower \
-    use_saved_map:=true map_file:=/maps/my_room.yaml
+E="docker compose -f docker/robot/compose.yaml exec robot /entrypoint.sh"
 ```
 
-★ AMCL は起動直後に自己位置が未確定です。RViz の **"2D Pose Estimate"** で
-初期位置を与えてから走らせてください。
+### 6-1. アーム（SO-101）
+
+| 名前 | 種別 | 用途 |
+| --- | --- | --- |
+| `/clicked_point` | Topic `PointStamped` | **リーチ目標**。RViz の "Publish Point" と同じ |
+| `/so101/reach_target` | Topic `PoseStamped` | リーチ目標（`frame_id: map` 必須） |
+| `/so101/reach_status` | Topic `String` | 判定結果 1 行。**まずこれを流しておく** |
+| `/so101/reach_markers` | Topic `Marker` | 目標球（緑 = 受理 / 赤 = 棄却） |
+| `/joint_trajectory_controller/follow_joint_trajectory` | **Action** | 関節を直接動かす（5 関節） |
+| `/gripper_controller/gripper_cmd` | **Action** | グリッパ |
+| `/so101/stow` | **Service** | **アームを畳む。停止前に必ず** |
+| `/joint_states` | Topic `JointState` | 関節角。★ publisher は 2 つ（車輪 / アーム） |
+
+```bash
+# map 上の点へ伸ばす
+$E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: 0.35, y: 0.05, z: 0.25}, orientation: {w: 1.0}}}'
+
+# 畳む（★ 停止前に必ず）
+$E ros2 service call /so101/stow std_srvs/srv/Trigger '{}'
+```
+
+> ★ **届かない目標は「警告して何もしない」**のが仕様です。ベースは動きません。
+> 到達不能かどうかは**指令を出す前にオフラインで判定**しています。
+
+### 6-2. ベース（走行・ナビゲーション）
+
+| 名前 | 種別 | 用途 |
+| --- | --- | --- |
+| `/goal_pose` | Topic `PoseStamped` | ナビ目標。RViz の "2D Goal Pose" と同じ |
+| `/navigate_to_pose` | **Action** | ナビの本筋。**結果とフィードバックが得られる** |
+| `/compute_path_to_pose` | **Action** | 経路計画だけ（走らない）。到達可能かの確認 |
+| `/cmd_vel` | Topic `Twist` | 速度指令。★ **安全機構より下流**（下記） |
+| `/odom` | Topic `Odometry` | 自己位置。★ **指令値の積分**で実測ではない |
+| `/map` | Topic `OccupancyGrid` | SLAM が作った地図 |
+| `/plan` `/optimal_trajectory` | Topic `Path` | 大域経路 / 局所軌道（MPPI） |
+| `/lekiwi_base_driver/recover` | **Service** | 過負荷ラッチ解除 + 速度モード再設定 |
+
+```bash
+# ナビ目標（アクション。結果が返る）
+$E ros2 action send_goal -f /navigate_to_pose nav2_msgs/action/NavigateToPose \
+  '{pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.5}, orientation: {w: 1.0}}}}'
+
+# ★ 車輪を浮かせてから。2 秒流す（watchdog が 0.5 秒なので --once では止まる）
+$E ros2 topic pub -r 10 --times 20 /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.05}}'
+```
+
+> ★ **`/cmd_vel` を手打ちすると Nav2 の安全機構を全部飛ばします。**
+> 本来は `controller_server → /cmd_vel_nav → velocity_smoother →
+> /cmd_vel_smoothed → collision_monitor → /cmd_vel` の 3 段構えで、
+> 加速度制限も衝突監視もその途中にあります。**床に降ろした状態で使わないこと。**
+
+### 6-3. LiDAR（RPLIDAR A1）
+
+| 名前 | 種別 | 用途 |
+| --- | --- | --- |
+| `/scan` | Topic `LaserScan` | 生スキャン（360°） |
+| `/scan_filtered` | Topic `LaserScan` | **前方 ±60° に絞ったもの** |
+
+```bash
+$E ros2 topic hz /scan
+$E ros2 run tf2_ros tf2_echo base_link laser_link   # 実測 (0.10, 0, 0.03) yaw −7°
+```
+
+> ★ **SLAM も costmap も `/scan_filtered` を見ています**（生の `/scan` ではありません）。
+> 360° のままだと自分の後輪とボディが障害物として地図に焼き付くためです。
+>
+> ★ `scan_filter` が起動していないと `/scan_filtered` の publisher が 0 になり、
+> **`map → odom` が永遠に出ません。** Nav2 は `Invalid frame ID map` を
+> INFO で吐き続けるのでエラーに見えません。
+
+### 6-4. RealSense（手首カメラ D435i）
+
+| 名前 | 種別 | 用途 |
+| --- | --- | --- |
+| `/wrist_camera/wrist_camera/depth/color/points` | Topic `PointCloud2` | 点群。★ **BEST_EFFORT** |
+| `/wrist_camera/wrist_camera/color/image_raw` | Topic `Image` | カラー画像 |
+
+```bash
+$E ros2 topic hz /wrist_camera/wrist_camera/depth/color/points
+$E ros2 run tf2_ros tf2_echo map wrist_camera_depth_optical_frame
+```
+
+> ★ **購読するときは QoS を `BEST_EFFORT` にしてください。** 既定は RELIABLE で、
+> そのままだと**1 通も届きません**（エラーも出ません）。
+>
+> ★ **点群を `map` 上に置くのに較正は要りません。** カメラは URDF で
+> `arm_gripper_link` に剛体固定されているので TF から出ます。
+> ただし**取付姿勢の既定値は未実測**なので、絶対位置はまだ信用できません
+> （[`docs/wrist_camera.md`](docs/wrist_camera.md)）。
+>
+> ★ **カメラが動くので、点群を使う側は TF を「メッセージのタイムスタンプ」で
+> 引くこと。** 最新 TF で解決すると腕の動作中に点群がずれます。
 
 ---
 

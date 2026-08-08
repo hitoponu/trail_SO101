@@ -4,8 +4,12 @@
 **★ ここに載っているものは、すべてモック構成で実在を確認しています**
 （`ros2 topic list -t` / `service list -t` / `action list -t`）。
 
-- 使い方の手順は [`../README.md`](../README.md)
+- 使い方の手順と **よく使うものだけのサブシステム別まとめ**は [`../README.md`](../README.md)
 - 中で何が起きているかは [`internals.md`](internals.md)
+
+> ★ このファイルは**網羅的なリファレンス**です。「まず何を叩けばよいか」は
+> README の[サブシステム別の節](../README.md#6-サブシステム別の-topic--service--action)
+> のほうが早く見つかります。
 
 ## 前置き
 
@@ -52,7 +56,7 @@ E="docker compose -f docker/robot/compose.mock.yaml exec robot-mock /entrypoint.
 
 ## トピック
 
-### ベース（走行）
+### ベース（走行）— 駆動とオドメトリ
 
 | トピック | 型 | 向き | 用途・注意 |
 | --- | --- | --- | --- |
@@ -62,7 +66,7 @@ E="docker compose -f docker/robot/compose.mock.yaml exec robot-mock /entrypoint.
 | `/odom` | `nav_msgs/Odometry` | ベース → | ★ **送った指令値の積分**。スリップも外乱もアームの反動も現れません |
 | `/joint_states` | `sensor_msgs/JointState` | → RSP | ★ **publisher は 2 つ**（車輪 3 関節 / アーム 6 関節）。購読側は複数メッセージにまたがって蓄積が要ります |
 
-### センサ
+### LiDAR（RPLIDAR A1）
 
 | トピック | 型 | 向き | 用途・注意 |
 | --- | --- | --- | --- |
@@ -82,7 +86,7 @@ E="docker compose -f docker/robot/compose.mock.yaml exec robot-mock /entrypoint.
 | `/local_costmap/published_footprint` | `geometry_msgs/PolygonStamped` | Nav2 → | ★ `robot_radius: 0.17` は**アームを畳んだ前提** |
 | `/initialpose` | `geometry_msgs/PoseWithCovarianceStamped` | → amcl | ★ **`use_saved_map:=true` のときだけ存在**。SLAM 構成には居ません |
 
-### アーム・リーチ
+### アーム（SO-101）・リーチ
 
 | トピック | 型 | 向き | 用途・注意 |
 | --- | --- | --- | --- |
@@ -93,7 +97,7 @@ E="docker compose -f docker/robot/compose.mock.yaml exec robot-mock /entrypoint.
 | `/joint_trajectory_controller/joint_trajectory` | `trajectory_msgs/JointTrajectory` | → JTC | 軌道を直接。**到達不能時にここへ 1 件も出ないこと**が「動かない」の確認になります |
 | `/robot_description` | `std_msgs/String` | RSP → | ★ **publisher は 1 つでなければなりません**（TRANSIENT_LOCAL / depth 1） |
 
-### 手首カメラ（★ 実機のみ。`sim:=true` では出ません）
+### RealSense（手首カメラ D435i。★ 実機のみ。`sim:=true` では出ません）
 
 | トピック | 型 | 用途・注意 |
 | --- | --- | --- |
