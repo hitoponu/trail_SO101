@@ -16,9 +16,10 @@ wheels/
 # images
 captured_images/
 outputs/
-# vcs import で Docker ビルド中に展開する上流リポジトリ (ros2_ws/so101_upstream.repos)。
+# vcs import で bootstrap.sh が展開する上流リポジトリ (ros2_ws/so101_upstream.repos)。
 # メッシュが SO101/assets と完全に同一なので追跡しない。
 ros2_ws/src/ros2_so_arm/
+ros2_ws/src/sllidar_ros2/
 
 # SLAM で保存した地図 (docker/lekiwi_bringup の MAP_DIR 既定値)
 maps/
@@ -31,11 +32,18 @@ ros2_ws/log/
 # ros2_ws のパッケージはこれに依存しないので、追跡しない。
 LeKiwi/
 
-# ★ agent 向けのファイルは main には載せない（ローカルには残す）。
+# ★ CLAUDE.md は main には載せない（ローカルには残す）。
 #   feat/* ブランチでは追跡している。あちらの .gitignore にこの行は無い。
 #
 #   ★ これは「未追跡のファイルを無視する」だけ。feat/* から main へマージすると
 #     向こうで追跡されているので**また入ってくる**。マージのたびに
-#     `git rm -r --cached docs CLAUDE.md` で外す必要がある。
-docs/
+#     `git rm --cached CLAUDE.md` で外す必要がある。
+#
+#   ★ docs/ 本体（利用者向けの文書）は main でも追跡する。README が
+#     8 本リンクしており、ignore すると clone した人が読めなくなるため。
+#
+#   ★ docs/agent/ だけは main に載せない。実機とのやり取り（依頼書と報告書）で、
+#     feat/* ブランチでのみ追跡する。実機側の agent はそちらを git pull する。
+#     マージのたびに `git rm -r --cached docs/agent CLAUDE.md` で外すこと。
+docs/agent/
 CLAUDE.md

@@ -8,14 +8,19 @@
   4. RViz (システム全体でこれ 1 つだけ)
 
 ★ ベース側 (base_driver / scan_filter / slam_toolbox / Nav2) はここでは起動しない。
-  それらは lekiwi_base_bringup と nav2/slam_toolbox に依存しており、
-  このイメージには入っていない (アームのイメージにはメッシュと LeRobot が入る代わりに
-  ベース側の依存は入れていない)。ベース側は別コンテナで
+
+  ★ **ふだんは robot.launch.py を使うこと。** あちらがこの launch を include した
+    うえでベースとカメラも起動するので、ロボット全体が 1 プロセスで上がる
+    (docker/robot の統合イメージには nav2 も lekiwi_base_bringup も入っている)。
+
+  この launch がアーム側だけなのは、4 コンテナ構成 (docker/lekiwi_so101_bringup)
+  のアームのイメージにベース側の依存が入っていないため。その構成ではベースを
+  別コンテナで
 
       ros2 launch lekiwi_base_bringup nav.launch.py \
         start_robot_state_publisher:=false start_rviz:=false
 
-  として起動すること。docker/lekiwi_so101_bringup/compose.yaml がそうしている。
+  として起動する。docker/lekiwi_so101_bringup/compose.yaml がそうしている。
 
 ★ なぜ RSP をこちらが持つのか
   結合 URDF は lekiwi_description と so_arm101_description の両方を必要とし、
@@ -178,9 +183,10 @@ def generate_launch_description():
                 default_value=os.environ.get(f"WRIST_CAMERA_{key.upper()}", ""),
                 description="空なら URDF の既定値を使う")
               for key in mount_keys),
-            # ★ 実測待ち。arm_mount_link から見たアーム基部の姿勢。
-            #   arm_mount_link 自体 (base_link から 0.08,-0.04,0.057) も CAD 由来で未実測。
-            #   docs/agent/request.md の手順 0 / 3 で確定させる。
+            # arm_mount_link から見たアーム基部の姿勢。既定の 0 は「補正なし」。
+            #   ★ arm_mount_link 自体は**実測済み** (2026-08-07)。
+            #     base_link から (0.08, 0.00, 0.057), rpy=0。
+            #     CAD の y=-0.04 は誤りで、実測は y=0 だった (docs/agent/report.md)。
             *(
                 DeclareLaunchArgument(f"arm_mount_{key}", default_value="0.0")
                 for key in mount_keys

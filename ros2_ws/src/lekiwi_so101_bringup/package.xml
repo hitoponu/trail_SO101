@@ -13,6 +13,16 @@
   <exec_depend>lekiwi_description</exec_depend>
   <exec_depend>so_arm101_description</exec_depend>
   <exec_depend>so101_bringup</exec_depend>
+  <!--
+    ★ 1 イメージ 1 コンテナへの統合で増えた依存。
+    robot.launch.py がベース側 (base_driver / scan_filter / SLAM / Nav2) を
+    include し、release_all が sts_bus.StsBus を再利用する。
+  -->
+  <exec_depend>lekiwi_base_bringup</exec_depend>
+  <exec_depend>realsense_bringup</exec_depend>
+  <exec_depend>sllidar_ros2</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
 
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>

@@ -1,0 +1,119 @@
+# LeKiwi ベース + RPLIDAR + SO-101 アーム + RealSense。**1 イメージ 1 コンテナ**。
+#
+#   cp .env.example .env     # 先に実機に合わせて編集する
+#   make build
+#   make bootstrap           # 初回とパッケージ追加時
+#   make up                  # コンテナを起動する (bash が上がるだけ)
+#   make run                 # コンテナに入って launch を叩く
+#
+# ■ なぜ 1 コンテナなのか
+#   以前は 4 コンテナに分けていた。理由は「アームとベースで安全論理が逆で、
+#   compose の stop_signal はサービス単位にしか設定できないから」。
+#   実際に踏んだ問題の多くはコンテナ跨ぎであること自体が原因だった
+#   (ROS_DOMAIN_ID の食い違い / nav2_msgs の置き場所 / discovery の遅れ /
+#    /robot_description の二重 latch / docker compose down が SIGINT を届けない)。
+#   1 コンテナにすればこれらは消える。
+#
+# ■ コンテナは bash を起動するだけで、launch は人が手で叩く
+#   compose の command に launch を書くと、停止が docker 側の都合になる。
+#   `docker compose down` は exec したプロセスに SIGINT を届けないし、
+#   stop_signal も 1 種類しか選べない。
+#   **launch を前面で走らせて Ctrl+C する**のがいちばん確実に停止処理が走る。
+#
+# ■ 停止
+#   通常  : launch を Ctrl+C する (アームのトルク OFF + ホイール停止)
+#   非常時: **物理スイッチを切る。** docker kill は使わない
+#           (SIGKILL では停止処理が走らず、ホイールは最後の指令速度で回り続ける)
+#   異常終了からの復帰: make release
+#
+# ■ 起動前チェック
+#   * .env の 3 つのデバイスが実機に合っていること (udev ルール必須)
+#   * ★ アームは 7.4V、ホイールは 12V。同一シリアルバスへ繋がないこと
+#   * URDF の arm_mount 位置が実測値に更新済みであること
+
+services:
+  robot:
+    build:
+      context: ../..
+      dockerfile: docker/robot/Dockerfile
+    image: local/lekiwi-so101:jazzy
+    container_name: robot
+    init: true
+    network_mode: host
+    ipc: host
+
+    # ★ RealSense のため。USB の再接続でノード番号が変わるので devices: では
+    #   掴めず、/dev/bus/usb をまるごと渡す必要がある。
+    #   1 コンテナ化の代償として、アームとホイールを駆動するプロセスも
+    #   特権で動くことになる (承知のうえ)。
+    privileged: true
+
+    # ★ シリアル3本は devices: ではなく bind mount で渡す。
+    #
+    # 分割構成 (docker/lekiwi_so101_bringup) では、シリアル用コンテナが
+    # 非 privileged なので devices: の名前付き割り当てがそのまま機能する。
+    # しかしこのコンテナは RealSense のため privileged であり、Docker は
+    # devices: の宛先を /dev の devtmpfs に作らない。その結果、ホストに
+    # /dev/so101_follower があっても、コンテナ内の同名パスが欠落する。
+    #
+    # bind mount は udev のシンボリックリンクをホスト側で解決してから
+    # 宛先のデバイスノードを作るため、既存構成と同じパスをコンテナ内で
+    # 利用できる。privileged と /dev/bus/usb は RealSense 用に残す。
+    group_add:
+      - ${DIALOUT_GID:-20}
+
+    environment:
+      DISPLAY: ${DISPLAY}
+      # Xwayland/X11 の認証ファイルを固定パスへマウントする。
+      XAUTHORITY: /tmp/.Xauthority
+      QT_X11_NO_MITSHM: "1"
+      QT_QPA_PLATFORM: xcb
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      # ★ コンテナが 1 つになったのでドメインの食い違いは起こりえない。
+      #   それでも既定 0 のままにはしない。docker/ 以下は network_mode: host
+      #   なので、同じ LAN の別マシンや別スタックと /tf が混信する。
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+      ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
+      # ★ 手首カメラ。robot.launch.py がこの値を **URDF と realsense の両方へ**
+      #   渡すので、以前の「compose の camera_name と URDF の不一致」は起きない。
+      WRIST_CAMERA: ${WRIST_CAMERA:-true}
+      WRIST_CAMERA_NAME: ${WRIST_CAMERA_NAME:-wrist_camera}
+      WRIST_CAMERA_PARENT: ${WRIST_CAMERA_PARENT:-gripper_link}
+      WRIST_CAMERA_FPS: ${WRIST_CAMERA_FPS:-6}
+      WRIST_CAMERA_DECIMATION: ${WRIST_CAMERA_DECIMATION:-2}
+      # ★ 空文字は「指定なし」= URDF の既定値を使う、という意味。
+      #   実測したら .env に書く。数値をここに書かないこと (URDF と二重管理になる)。
+      WRIST_CAMERA_X: ${WRIST_CAMERA_X:-}
+      WRIST_CAMERA_Y: ${WRIST_CAMERA_Y:-}
+      WRIST_CAMERA_Z: ${WRIST_CAMERA_Z:-}
+      WRIST_CAMERA_ROLL: ${WRIST_CAMERA_ROLL:-}
+      WRIST_CAMERA_PITCH: ${WRIST_CAMERA_PITCH:-}
+      WRIST_CAMERA_YAW: ${WRIST_CAMERA_YAW:-}
+
+    volumes:
+      # privileged コンテナでは devices: の /dev 宛先が作られないため、
+      # シリアルは bind mount で既存の安定名をそのまま渡す。
+      - ${LEKIWI_DEVICE:-/dev/lekiwi}:${LEKIWI_DEVICE:-/dev/lekiwi}
+      - ${RPLIDAR_DEVICE:-/dev/rplidar}:${RPLIDAR_DEVICE:-/dev/rplidar}
+      - ${SO101_DEVICE:-/dev/so101_follower}:${SO101_DEVICE:-/dev/so101_follower}
+      # ★ ROS ワークスペースはホストからマウントする。イメージにパッケージを
+      #   焼き込まないので、lekiwi_description も so_arm101_description も
+      #   ここから解決される。初回とパッケージ追加時は make bootstrap。
+      - ../../ros2_ws:/ros2_ws
+      - ./bootstrap.sh:/bootstrap.sh:ro
+      # RealSense。privileged と併せて USB の再接続に追従させる。
+      - /dev/bus/usb:/dev/bus/usb
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro
+      - ${MAP_DIR:-$HOME/maps}:/maps
+      # LeRobot の較正値。実体はサーボの EEPROM で、この JSON はその控え。
+      # 較正を実行した PC のホームにしか無い。
+      - ${HOME}/.cache/huggingface/lerobot/calibration/robots/so_follower:/root/.cache/huggingface/lerobot/calibration/robots/so_follower:ro
+
+    # ★ bash を起動するだけ。launch は make run か docker compose exec で叩く。
+    command: ["bash"]
+    stdin_open: true
+    tty: true
+    restart: "no"

@@ -43,14 +43,11 @@
 
     <!-- ================= 寸法 (CAD 由来) ================= -->
 
-    <!-- 車軸の高さ。base_link 原点 (= CAD 原点) からの実測値 -->
-    <xacro:property name="axle_z" value="0.01786"/>
+    <!-- 下段プレート上面 (= base_link 原点) の地面からの実測値。 -->
+    <xacro:property name="base_link_z" value="0.040"/>
 
-    <!-- 接地面から base_link までの高さ。
-         CAD 実測では 0.032924 m (このとき車輪半径 0.050784 m)。
-         wheel_radius から導出しておけば、公称 0.05 を使っても車輪が
-         きっちり接地する。 -->
-    <xacro:property name="base_link_z" value="${wheel_radius - axle_z}"/>
+    <!-- 車軸の高さ。車輪が地面に接するよう、車輪半径から導出する。 -->
+    <xacro:property name="axle_z" value="${wheel_radius - base_link_z}"/>
 
     <xacro:property name="wheel_width" value="0.026"/>  <!-- 仮値: 見た目のみ -->
 
@@ -58,8 +55,8 @@
     <xacro:property name="plate_size" value="0.216"/>
     <xacro:property name="plate_thickness" value="0.007"/>
 
-    <!-- 第2プレート: base_link から +0.05 m -->
-    <xacro:property name="plate2_z" value="0.05"/>
+    <!-- 第2プレート: 上面間の実測値 92 - 40 = 52 mm -->
+    <xacro:property name="plate2_z" value="0.052"/>
 
     <!-- CAD 座標系 → base_link の回転。メッシュを使う場合に必要 -->
     <xacro:property name="cad_yaw" value="${-pi/2}"/>

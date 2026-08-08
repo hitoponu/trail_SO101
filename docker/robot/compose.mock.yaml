@@ -1,0 +1,56 @@
+# 実機に一切触れないモック構成。Mac でも動く。**1 コンテナ**。
+#
+#   make mock
+#
+# ■ ★ compose.yaml のオーバーレイではなく「単独ファイル」にしてある
+#   Compose は devices: を**マージ**するので、オーバーレイでデバイスを外せない。
+#   `!override` (Compose spec 2.24+) を使う手もあるが、実機デバイスを
+#   誤って掴む可能性を残さないため単独ファイルにした。
+#   較正 JSON の bind mount も無い (mock では不要で、Docker Desktop が
+#   存在しないパスを空ディレクトリとして勝手に作ってしまうため)。
+#   privileged と /dev/bus/usb も無い (RealSense を起動しないので不要)。
+#
+# ■ 動くもの / 動かないもの
+#   動く: 結合 URDF、実ジオメトリの FK/ヤコビアン、ソルバの収束と到達不能判定、
+#         ROS グラフ全体、map→…→arm_gripper_frame_link の TF、
+#         fake_scan からの slam_toolbox による map→odom、リーチの軌道生成、
+#         JTC の実行、JointStateTopicSystem + MockSO101Backend による状態の折り返し
+#   動かない: サーボのトルク/PID、実オドメトリの滑り、実スキャン形状、
+#             arm_mount の実姿勢と yaw、USB 列挙、12V/7.4V の分離、干渉、
+#             RealSense の点群 (模擬光学フレームだけ出す)
+#
+# ■ RViz は既定で切ってある
+#   Apple Silicon の XQuartz + ソフトウェア GL は遅く不安定。
+#   形状の確認は tf2_echo と view_frames の PDF で行い、目視確認は Linux 機で。
+
+services:
+  robot-mock:
+    build:
+      context: ../..
+      dockerfile: docker/robot/Dockerfile
+    image: local/lekiwi-so101:jazzy
+    container_name: robot-mock
+    init: true
+    network_mode: host
+    ipc: host
+    # devices: 無し。privileged 無し。シリアルも USB も一切開かない。
+    environment:
+      DISPLAY: ${DISPLAY}
+      XAUTHORITY: /tmp/.Xauthority
+      LIBGL_ALWAYS_SOFTWARE: ${LIBGL_ALWAYS_SOFTWARE:-1}
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-7}
+      ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-1}
+      ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
+      WRIST_CAMERA: ${WRIST_CAMERA:-true}
+      WRIST_CAMERA_NAME: ${WRIST_CAMERA_NAME:-wrist_camera}
+      WRIST_CAMERA_PARENT: ${WRIST_CAMERA_PARENT:-gripper_link}
+    volumes:
+      - ../../ros2_ws:/ros2_ws
+      - ./bootstrap.sh:/bootstrap.sh:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro
+    command: ["bash"]
+    stdin_open: true
+    tty: true
+    restart: "no"

@@ -19,6 +19,7 @@ import copy
 import math
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
@@ -74,9 +75,19 @@ class ScanFilter(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = ScanFilter()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # ★ Ctrl+C は正常終了。捕まえないと停止のたびにトレースバックと
+        #   "process has died [exit code -2]" が launch のログに出る。
+        #   このノードはハードウェアを持たないので安全性には影響しないが、
+        #   統合 launch では停止経路が Ctrl+C 一本なので、正常な停止でログが
+        #   赤くなると**本物の異常を見落とす**。fake_scan と同じ扱いに揃える。
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,9 @@
 # RPLIDAR A1M8 + ROS 2 Jazzy + Docker
 
+> **★ 通常の運用は [`../robot/`](../robot/) を使ってください（1 イメージ 1 コンテナの統合スタック）。**
+> このディレクトリは**このサブシステムだけを切り分けたいとき**のために残してあります。
+> 統合スタックと同時に起動しないこと（`ROS_DOMAIN_ID` が衝突して `/tf` が混信します）。
+
 RPLIDAR A1M8から `/scan` (`sensor_msgs/msg/LaserScan`) を取得し、
 `/scan/points` (`sensor_msgs/msg/PointCloud2`) に変換してRViz 2で表示する構成です。
 A1M8は平面を測る2D LiDARなので、生成される点群も高さ `z=0` の2D点群です。
