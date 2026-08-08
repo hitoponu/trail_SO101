@@ -19,6 +19,7 @@ Phase D (実機での回転方向・前方向・鏡像の確定) の**前に**�
     uv run --no-project --with pytest --with numpy pytest test/ -v
 """
 
+import itertools
 import math
 
 import numpy as np
@@ -324,3 +325,73 @@ def test_ticks_to_radps(sign) -> None:
     """4096 ticks/s = 1 rev/s = 2pi rad/s。"""
     assert kin.ticks_to_radps(4096, sign) == pytest.approx(sign * 2.0 * math.pi)
     assert kin.ticks_to_radps(0, sign) == 0.0
+
+
+# ── 「横移動を指令したのに旋回する」の切り分け ──────────────────────────
+#
+# 実機で `linear.y` を指令すると旋回する、という報告が出た (2026-08-08)。
+# 3 つのノブのうち**どれが原因になりうるか**を計算で絞り込んだ結果を固定する。
+#
+# 根拠は 1 行で言える: 運動学行列 M の第 3 列は 3 輪とも +base_radius なので、
+# **回転成分は 3 輪の速度の平均に比例する**。
+
+
+def _realized(m, permutation=(0, 1, 2), signs=(1.0, 1.0, 1.0)) -> np.ndarray:
+    """モデルと実機の対応付けを取り違えたときに実際に出る車体速度の写像。
+
+    ``v_real = _realized(...) @ v_command``
+    """
+    p = np.zeros((3, 3))
+    for physical, model_row in enumerate(permutation):
+        p[physical, model_row] = 1.0
+    return np.linalg.inv(m) @ (np.diag(signs) @ p @ m)
+
+
+@pytest.mark.parametrize("offset", [-180.0, -150.0, -120.0, -60.0, -30.0, 0.0, 90.0])
+def test_取付角のずれは並進を旋回にできない(offset) -> None:
+    """``wheel_angle_offset_deg`` を間違えても横移動が旋回にはならない。
+
+    3 輪が 120° 等間隔なので、どの角度を足しても 3 輪の速度の平均は変わらない。
+    → 実機の「横移動で旋回する」の原因からこのノブを除外できる。
+    """
+    realized = np.linalg.inv(kin.wheel_matrix(BASE_RADIUS, -90.0)) @ kin.wheel_matrix(
+        BASE_RADIUS, offset
+    )
+    assert (realized @ np.array([0.0, 1.0, 0.0]))[2] == pytest.approx(0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize(
+    "permutation",
+    [(0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0)],
+)
+def test_motor_idsの並べ替えは並進を旋回にできない(m, permutation) -> None:
+    """``motor_ids`` の順序を間違えても横移動が旋回にはならない。
+
+    並べ替えは 3 輪の速度の**多重集合**を変えないので平均も変わらない。
+    → 実機の「横移動で旋回する」の原因からこのノブも除外できる。
+    """
+    assert (_realized(m, permutation=permutation) @ np.array([0.0, 1.0, 0.0]))[
+        2
+    ] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_後輪の符号反転だけが前進を保ったまま横移動を旋回にする(m) -> None:
+    """★ 実機報告「前進は正常・横移動で旋回」に合う取り違えは 1 つだけ。
+
+    符号反転 7 通りのうち、**前進が完全に正常のまま**横移動が旋回になるのは
+    back(8) の反転だけ。他は前進も壊れる (逆走するか横に流れる)。
+    → 予想される修正は ``wheel_direction_signs: [1.0, -1.0, 1.0]``。
+    """
+    forward, sideways = np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])
+
+    back = _realized(m, signs=(1.0, -1.0, 1.0))
+    assert back @ forward == pytest.approx(forward), "前進が正常でなくなった"
+    assert abs((back @ sideways)[2]) > 5.0, "横移動が旋回になっていない"
+
+    others = [s for s in itertools.product([1.0, -1.0], repeat=3)
+              if s not in {(1.0, 1.0, 1.0), (1.0, -1.0, 1.0)}]
+    for signs in others:
+        realized = _realized(m, signs=signs)
+        assert realized @ forward != pytest.approx(forward), (
+            f"signs={signs} も前進を保ってしまう。原因が一意に絞れない"
+        )

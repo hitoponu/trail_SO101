@@ -67,11 +67,12 @@ class FakeNode:
     # 検証対象の実装をそのまま使う（コピーではなく本物であることが重要）
     nudge_joint = TeleopKeyboard.nudge_joint
     hold_arm = TeleopKeyboard.hold_arm
-    _send_target = TeleopKeyboard._send_target
+    _advance_arm = TeleopKeyboard._advance_arm
     _sync_target = TeleopKeyboard._sync_target
+    _describe = TeleopKeyboard._describe
     _clamp = TeleopKeyboard._clamp
 
-    def __init__(self, positions=None, limits=None, margin=0.0):
+    def __init__(self, positions=None, limits=None, margin=0.0, speed=0.5, rate=20.0):
         import threading
 
         self._lock = threading.Lock()
@@ -80,18 +81,24 @@ class FakeNode:
         if positions is None:
             positions = {name: 0.0 for name in self._joints}
         self._positions = dict(positions)
-        self._target = None
+        self._goal = None
+        self._command = None
         self._limits = limits
         self._margin = margin
         self._arm_step = 0.05
+        self._arm_speed = speed
+        self._arm_max_lead = 0.15
         self._arm_duration = 0.2
+        self._rate = rate
+        self._settle = 0
+        self._settle_frames = 4
         self.sent: list[list[float]] = []
         self.twists: list[tuple[float, float, float]] = []
         self.gripper_calls: list[float] = []
 
     # --- ROS の代わり ---
-    def _publish(self, target):
-        self.sent.append(list(target))
+    def _publish_trajectory(self, positions):
+        self.sent.append(list(positions))
 
     def set_base(self, vx, vy, wz):
         self.twists.append((vx, vy, wz))
@@ -100,68 +107,131 @@ class FakeNode:
         self.gripper_calls.append(direction)
         return f"gripper {direction:+.1f}"
 
-
-# TeleopKeyboard._send_target は JointTrajectory を組んで publish する。
-# ROS 型が無いテストでは組み立て部分だけ差し替え、「何を目標にしたか」を見る。
-def _send_target(self, index):
-    self._publish(self._target)
-    if index is None:
-        return "hold"
-    return f"{self._joints[index]} {self._target[index]:+.3f}"
-
-
-FakeNode._send_target = _send_target
+    # --- テストの補助 ---
+    def run(self, frames: int):
+        """タイマーを frames 回まわす。"""
+        for _ in range(frames):
+            self._advance_arm()
 
 
 def test_全キーが意図した関節を動かす():
     """★ 実機バグの直接の再現。1/q/2/w/... が別々の関節に効くこと。"""
-    moved = {}
+    seen = []
     for key, (index, direction) in ARM_KEYS.items():
         node = FakeNode()
         handle_key(node, key)
-        assert len(node.sent) == 1, key
-        changed = [i for i, v in enumerate(node.sent[0]) if v != 0.0]
+        node.run(40)  # 行き先へ到達するまで回す
+        assert node.sent, key
+        changed = [i for i, v in enumerate(node.sent[-1]) if abs(v) > 1e-9]
         assert changed == [index], f"{key} が動かした関節 {changed} != [{index}]"
-        moved[key] = (index, node.sent[0][index])
-        assert node.sent[0][index] == pytest.approx(direction * 0.05)
+        assert node.sent[-1][index] == pytest.approx(direction * 0.05)
+        seen.append(index)
 
-    # 上段 5 キーが 5 関節すべてを、重複なくカバーしていること
-    assert sorted(i for i, _ in moved.values())[::2] == [0, 1, 2, 3, 4]
+    # 5 関節すべてを、+ と − の 2 キーずつでカバーしていること
+    assert sorted(set(seen)) == [0, 1, 2, 3, 4]
+    assert len(seen) == 10
 
 
 def test_目標は実測値ではなく前回の目標に積む():
-    """★ バグの本体。保持力が弱く関節が垂れても、目標は垂れに追従しない。"""
+    """★ バグ その1。保持力が弱く関節が垂れても、目標は垂れに追従しない。"""
     node = FakeNode()
     node.nudge_joint(1, +1.0)
+    node.run(40)
     assert node.sent[-1][1] == pytest.approx(+0.05)
 
     # 実測が重力で下がった（P=16 の保持力問題）。次の指令は影響を受けないこと。
     node._positions["arm_shoulder_lift_joint"] = -0.30
 
     node.nudge_joint(0, +1.0)  # 別の関節を動かす
+    node.run(40)
     assert node.sent[-1][1] == pytest.approx(+0.05), "垂れた実測値が目標に混入した"
     assert node.sent[-1][0] == pytest.approx(+0.05)
 
     node.nudge_joint(1, +1.0)
+    node.run(40)
     assert node.sent[-1][1] == pytest.approx(+0.10), "目標が累積していない"
+
+
+def test_キー入力そのものでは送信しない():
+    """★ バグ その2 の核心。送信するのはタイマーだけ。"""
+    node = FakeNode()
+    for _ in range(30):  # オートリピート 30 連打
+        node.nudge_joint(1, +1.0)
+    assert node.sent == [], "キー入力から直接 publish している"
+
+
+def test_押しっぱなしでも指令はarm_speedを超えない():
+    """★ 端末のオートリピート速度に指令が引きずられないこと。"""
+    node = FakeNode(speed=0.5, rate=20.0)
+    per_frame = 0.5 / 20.0  # 0.025 rad
+
+    node.nudge_joint(1, +1.0)
+    node.run(1)
+    first = node.sent[-1][1]
+    assert first == pytest.approx(per_frame), "1 フレームで行き先まで飛んだ"
+
+    for _ in range(30):  # 押しっぱなし相当
+        node.nudge_joint(1, +1.0)
+    node.run(1)
+    assert node.sent[-1][1] - first == pytest.approx(per_frame), "連打で加速した"
+
+
+def test_行き先は指令をmax_lead以上先行しない():
+    """離した後に動き続ける量を有界にする。"""
+    node = FakeNode()
+    for _ in range(100):
+        node.nudge_joint(1, +1.0)
+    assert node._goal[1] <= node._command[1] + node._arm_max_lead + 1e-9
+
+    node.run(200)  # キーを離した後
+    assert node.sent[-1][1] <= node._arm_max_lead + 1e-9
+
+
+def test_最終点の速度は必ずゼロ():
+    """★ JTC は最終点の速度が 0 以外の軌道を**拒否**する。
+
+    「Velocity of last trajectory point of joint X is not zero」で弾かれ、
+    アームがまったく動かなくなる（モックで実測して判明）。
+    追従の速さは arm_step_duration で調整すること。
+    """
+    import inspect
+
+    from lekiwi_examples import teleop_keyboard
+
+    source = inspect.getsource(teleop_keyboard.TeleopKeyboard._publish_trajectory)
+    assert "point.velocities = [0.0] * len(positions)" in source
+
+
+def test_静止したら送信を止める():
+    """★ 静止中に JTC を毎周期 preempt しない（リーチノードと競合する）。"""
+    node = FakeNode()
+    node.nudge_joint(1, +1.0)
+    node.run(60)
+    before = len(node.sent)
+    node.run(60)
+    assert len(node.sent) == before, "静止中も送り続けている"
 
 
 def test_Space_は実測値へ同期し直す():
     node = FakeNode()
     node.nudge_joint(1, +1.0)
+    node.run(40)
     node._positions["arm_shoulder_lift_joint"] = -0.30
 
     handle_key(node, " ")
+    node.run(1)
     assert node.sent[-1][1] == pytest.approx(-0.30), "Space が現在姿勢を取り込んでいない"
 
     # 同期後は、その位置からの相対で積む
     node.nudge_joint(1, +1.0)
+    node.run(40)
     assert node.sent[-1][1] == pytest.approx(-0.25)
 
 
 def test_関節状態が来る前は何も送らない():
     node = FakeNode(positions={})
     status = node.nudge_joint(0, +1.0)
+    node.run(10)
     assert node.sent == []
     assert "待っています" in status
 
@@ -169,11 +239,15 @@ def test_関節状態が来る前は何も送らない():
 def test_可動域でクランプする():
     limits = [(-1.0, 1.0)] * 5
     node = FakeNode(limits=limits, margin=0.10)
-    for _ in range(100):
+    for _ in range(200):
         node.nudge_joint(0, +1.0)
+        node.run(2)
+    node.run(200)
     assert node.sent[-1][0] == pytest.approx(0.90), "上限 - margin を超えた"
-    for _ in range(100):
+    for _ in range(200):
         node.nudge_joint(0, -1.0)
+        node.run(2)
+    node.run(200)
     assert node.sent[-1][0] == pytest.approx(-0.90)
 
 
@@ -181,6 +255,7 @@ def test_余白が可動域より広ければクランプしない():
     """margin が過大でも「動かせない」にはせず、素通しにする。"""
     node = FakeNode(limits=[(-0.05, 0.05)] * 5, margin=0.10)
     node.nudge_joint(0, +1.0)
+    node.run(40)
     assert node.sent[-1][0] == pytest.approx(0.05)
 
 

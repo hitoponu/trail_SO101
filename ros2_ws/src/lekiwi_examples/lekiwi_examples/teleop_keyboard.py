@@ -20,16 +20,27 @@
   速度ゼロにする)。**アームは止まらず、その姿勢で保持する**。
 
 ────────────────────────────────────────────────────────────────────────
-★ 指令目標は自前で保持する (実測値を読み直さない)
+★ アームの指令の作り方 (実機で 2 回踏んだ落とし穴)
 ────────────────────────────────────────────────────────────────────────
-このノードは自分が送った目標 (`_target`) を覚えていて、キー入力ごとに
-そこへ加算する。**`/joint_states` の実測値に足し込んではならない。**
+アームは **行き先 `_goal`** と **実際に送る目標 `_command`** の 2 段構え。
+キーは `_goal` を `arm_step` 進めるだけで、**送信は 20Hz のタイマーだけ**が
+行い、`_command` を `arm_speed` [rad/s] で `_goal` へ寄せていく。
 
-理由は保持力が弱いこと (全関節 `P=16`。docs/lekiwi_so101_reach.md の
-「既知の未解決事項」)。位置制御のトルクは概ね `P × 位置偏差`なので、
-目標に追い付いた関節は偏差ゼロ = トルクゼロになり、重力で下がる。
-実測値を読み直すと**その下がった値が次の目標に焼き込まれ**、どのキーを
-押しても shoulder_lift が下がり続ける (実際にそうなっていた)。
+こう書かないと壊れる理由が 2 つある。どちらも実機でしか出ない。
+
+1. **実測値を読み直してはならない。**
+   保持力が弱い (全関節 `P=16`。docs/lekiwi_so101_reach.md の
+   「既知の未解決事項」)。位置制御のトルクは概ね `P × 位置偏差`なので、
+   目標に追い付いた関節は偏差ゼロ = トルクゼロになり重力で下がる。
+   実測値に足し込むと**下がった値が次の目標に焼き込まれ**、どのキーを
+   押しても shoulder_lift が下がり続ける。
+
+2. **キー 1 打ごとに軌道を投げてはならない。**
+   JTC は新しい軌道を受けるたび前の軌道を捨て、**実測値から引き直す**
+   (`open_loop_control` は既定 false)。しかも始点速度に使われる
+   `/joint_states` の velocity は、STS3215 の 1 量子が 0.077 rad/s に化ける
+   信用できない値 (CLAUDE.md)。端末のオートリピート (約 30Hz) でこれを
+   毎回踏むと、**押している間は震え、離すと溜まった目標へ動く**。
 
 代償として目標と実測はずれていく。ステータス行に実測値も出すので、
 ずれが大きければ **Space** で現在姿勢へ同期し直すこと。
@@ -125,9 +136,19 @@ class TeleopKeyboard(Node):
             #   キー操作は微調整が効かないので、既定は遅いほうが安全。
             "base_linear_speed": 0.10,
             "base_angular_speed": 0.5,
-            # アームは 1 キー押下あたりこれだけ動く [rad]。
+            # アームは 1 キー押下あたりこれだけ「行き先」が進む [rad]。
             "arm_step": 0.05,
-            "arm_step_duration": 0.20,
+            # ★ 実際に送る目標は行き先へこの速度で近づく [rad/s]。
+            #   キーのオートリピート速度 (端末・OS まかせ) に指令が
+            #   引きずられないようにするための律速。
+            "arm_speed": 0.5,
+            # ★ 行き先が指令をこれ以上先行しない [rad]。押しっぱなしで
+            #   行き先が暴走すると、キーを離した後もその差だけ動き続ける。
+            "arm_max_lead": 0.15,
+            # 送る軌道の到達時間 [s]。★ publish 周期の 2 倍程度にする。
+            #   長くすると JTC が「ゆっくり減速して止まる」軌道を張り、
+            #   次の軌道が来るまでにほとんど進まない（追従が遅れる）。
+            "arm_step_duration": 0.10,
             # グリッパは 0.0-1.0 の正規化位置で送る。
             "gripper_step": 0.10,
             # 可動域の端から残す余白 [rad]。可動域そのものは /robot_description
@@ -145,7 +166,10 @@ class TeleopKeyboard(Node):
         self._joints = [f"{prefix}{name}" for name in ARM_JOINT_ORDER]
         self._gripper_joint = f"{prefix}gripper_joint"
         self._arm_step = float(param("arm_step"))
+        self._arm_speed = float(param("arm_speed"))
+        self._arm_max_lead = float(param("arm_max_lead"))
         self._arm_duration = float(param("arm_step_duration"))
+        self._rate = float(param("publish_rate"))
         self._gripper_step = float(param("gripper_step"))
         self._margin = float(param("joint_limit_margin"))
         self._linear = float(param("base_linear_speed"))
@@ -165,9 +189,18 @@ class TeleopKeyboard(Node):
         self._twist = (0.0, 0.0, 0.0)
         self._lock = threading.Lock()
         self._gripper_target: float | None = None
-        # ★ 自分が送った目標。実測値ではない (モジュール冒頭の注意を読むこと)。
-        self._target: list[float] | None = None
+        # ★ アームは 2 段構え。どちらも実測値ではない
+        #   (モジュール冒頭の注意を読むこと)。
+        #   _goal    利用者の行き先。キー 1 打で arm_step 進む
+        #   _command 実際に送っている目標。_goal へ arm_speed [rad/s] で近づく
+        self._goal: list[float] | None = None
+        self._command: list[float] | None = None
         self._limits: list[tuple[float, float]] | None = None
+        # 到着後も数フレームだけ送って落ち着かせ、その後は黙る。
+        # ★ 静止中に送り続けない。JTC を毎周期 preempt すると、
+        #   リーチノードなど他の利用者と競合する。
+        self._settle = 0
+        self._settle_frames = max(1, int(self._arm_duration * self._rate))
 
         self.create_subscription(JointState, "/joint_states", self._joint_state_cb, 10)
         # /robot_description は TRANSIENT_LOCAL / depth 1。あとから繋いでも
@@ -183,7 +216,11 @@ class TeleopKeyboard(Node):
             ),
         )
 
-        self.create_timer(1.0 / float(param("publish_rate")), self._publish_twist)
+        # ★ ベースもアームもこの 1 本のタイマーからしか送らない。
+        #   キー入力そのものから送ると、端末のオートリピート速度が
+        #   そのまま指令の周期になってしまう (実機で「押している間は
+        #   震えて、離すと動く」症状を出した)。
+        self.create_timer(1.0 / self._rate, self._tick)
 
     # ── 状態 ──────────────────────────────────────────────────────────
 
@@ -208,11 +245,13 @@ class TeleopKeyboard(Node):
         self.get_logger().info("URDF から可動域を読みました")
 
     def _sync_target(self) -> bool:
-        """実測値を目標として取り込む。まだ関節が揃っていなければ False。"""
+        """実測姿勢を行き先・指令の両方に取り込む。関節が揃っていなければ False。"""
         with self._lock:
             if not all(name in self._positions for name in self._joints):
                 return False
-            self._target = [self._positions[name] for name in self._joints]
+            current = [self._positions[name] for name in self._joints]
+            self._goal = list(current)
+            self._command = list(current)
         return True
 
     def _clamp(self, index: int, value: float) -> float:
@@ -242,35 +281,73 @@ class TeleopKeyboard(Node):
     # ── アーム ────────────────────────────────────────────────────────
 
     def nudge_joint(self, index: int, direction: float) -> str:
-        """1 関節だけを arm_step ぶん動かす目標を送る。
+        """行き先を arm_step ぶん進める。送信はタイマーがやる。
 
-        ★ 加算するのは**前回送った目標**であって実測値ではない。理由は
-          モジュール冒頭の「指令目標は自前で保持する」を読むこと。
+        ★ ここでは publish しない。キー 1 打ごとに軌道を投げると、JTC が
+          そのたび前の軌道を破棄して**実測値から引き直す**
+          (open_loop_control は既定 false)。実測の velocity は量子化ノイズが
+          0.077 rad/s に化ける値なので、引き直すたびに始点速度が暴れる。
+          実機で「押している間は震えて、離すと動く」になったのはこれ。
         """
-        if self._target is None and not self._sync_target():
+        if self._goal is None and not self._sync_target():
             return "関節状態を待っています（/joint_states）"
-        assert self._target is not None
-        self._target[index] = self._clamp(
-            index, self._target[index] + direction * self._arm_step
-        )
-        return self._send_target(index)
+        with self._lock:
+            assert self._goal is not None and self._command is not None
+            goal = self._clamp(index, self._goal[index] + direction * self._arm_step)
+            # ★ 行き先が指令を先行しすぎないようにする。オートリピートで
+            #   行き先が暴走すると、キーを離した後もその差だけ動き続ける。
+            lead = goal - self._command[index]
+            if abs(lead) > self._arm_max_lead:
+                goal = self._command[index] + self._arm_max_lead * (
+                    1.0 if lead > 0 else -1.0
+                )
+            self._goal[index] = goal
+        return self._describe(index)
 
     def hold_arm(self) -> str:
-        """いまの実測姿勢を目標として送り直す（目標と実測のずれを解消する）。"""
+        """いまの実測姿勢で止める（行き先・指令をそこへ同期し直す）。"""
         if not self._sync_target():
             return "関節状態を待っています"
-        return self._send_target(None)
+        with self._lock:
+            self._settle = self._settle_frames
+        return "アームを現在姿勢で保持（目標を実測値へ同期）"
 
-    def _send_target(self, index: int | None) -> str:
-        assert self._target is not None
-        target = list(self._target)
+    def _advance_arm(self) -> None:
+        """指令を行き先へ arm_speed で近づけ、動いている間だけ送る。"""
+        step = self._arm_speed / self._rate
+        with self._lock:
+            if self._goal is None or self._command is None:
+                return
+            moving = False
+            for i, (goal, command) in enumerate(zip(self._goal, self._command)):
+                delta = goal - command
+                if abs(delta) < 1e-6:
+                    continue
+                moving = True
+                if abs(delta) <= step:
+                    self._command[i] = goal
+                else:
+                    self._command[i] = command + step * (1.0 if delta > 0 else -1.0)
+            if moving:
+                self._settle = self._settle_frames
+            elif self._settle > 0:
+                self._settle -= 1
+            else:
+                return  # ★ 静止中は黙る。JTC を毎周期 preempt しない
+            command = list(self._command)
+        self._publish_trajectory(command)
 
+    def _publish_trajectory(self, positions) -> None:
         message = JointTrajectory()
         message.header.stamp = self.get_clock().now().to_msg()
         message.joint_names = list(self._joints)
         point = JointTrajectoryPoint()
-        point.positions = [float(v) for v in target]
-        point.velocities = [0.0] * len(target)
+        point.positions = [float(v) for v in positions]
+        # ★ 最終点の速度は 0 でなければならない。JTC は 0 以外を
+        #   「Velocity of last trajectory point ... is not zero」で**拒否**し、
+        #   アームはまったく動かない（モックで実測して判明）。
+        #   追従の速さは arm_step_duration（到達時間）で調整すること。
+        point.velocities = [0.0] * len(positions)
         seconds = int(self._arm_duration)
         point.time_from_start = Duration(
             sec=seconds, nanosec=int((self._arm_duration - seconds) * 1e9)
@@ -278,15 +355,19 @@ class TeleopKeyboard(Node):
         message.points = [point]
         self._traj_pub.publish(message)
 
-        if index is None:
-            return "アームを現在姿勢で保持（目標を実測値へ同期）"
+    def _describe(self, index: int) -> str:
         # ★ 実測値も併記する。P=16 で保持力が弱いため目標と実測はずれる。
         #   ずれが見えていないと「効いていない」と誤解する。
         name = self._joints[index]
         with self._lock:
+            goal = self._goal[index] if self._goal else 0.0
             actual = self._positions.get(name)
         actual_text = "実測 --" if actual is None else f"実測 {actual:+.3f}"
-        return f"{name} 目標 {target[index]:+.3f} ({actual_text}) rad"
+        return f"{name} 目標 {goal:+.3f} ({actual_text}) rad"
+
+    def _tick(self) -> None:
+        self._publish_twist()
+        self._advance_arm()
 
     def nudge_gripper(self, direction: float) -> str:
         if not self._gripper.server_is_ready():
