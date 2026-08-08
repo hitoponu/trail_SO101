@@ -88,10 +88,20 @@ Hi from my_first_pkg.
 <depend>tf2_ros</depend>
 ```
 
-> ★ **`feetech-servo-sdk`（import 名 `scservo_sdk`）と `lerobot` には rosdep キーが
-> ありません。** `package.xml` に書けないので、`docker/robot/Dockerfile` の
-> `pip install` が唯一の導入経路です。新しい pip 依存が要るときは
-> Dockerfile に足して `make build` してください。
+> ★ **`feetech-servo-sdk`（import 名 `scservo_sdk`）や `lerobot` には rosdep キーが
+> ありません。** `package.xml` には書けません。
+>
+> **Python の依存は `docker/robot/pyproject.toml` に足して `uv lock` を更新し、
+> `make build` します**（コンテナ内の `/opt/venv` を uv が管理しています）。
+>
+> ```bash
+> # docker/robot/pyproject.toml に足してから、コンテナ内で
+> cd /opt/robot-venv && uv lock
+> # 生成された uv.lock を docker/robot/ へコピーして commit
+> ```
+>
+> ★ ホストの `pyproject.toml`（リポジトリルート）とは**別物**です。あちらは
+> `examples/` の lerobot 直叩き用で、共有していません。
 
 ---
 
@@ -201,6 +211,71 @@ msg.pose.position.x = 0.35
 msg.pose.orientation.w = 1.0
 self._pub.publish(msg)
 ```
+
+### 画像を扱う（★ `cv_bridge` を使わないこと）
+
+**`cv_bridge` を import しないでください。** `import` は成功しますが、
+**実際に使うとプロセスが Segmentation fault で落ちます**（実測、exit 139）。
+
+```
+$ python3 -c "import numpy, cv2, cv_bridge; cv_bridge.CvBridge().imgmsg_to_cv2(msg)"
+Segmentation fault
+```
+
+理由は **`cv_bridge` の C 拡張が apt の numpy 1.26 に対してビルドされている**
+ことです。このコンテナは lerobot の要求で numpy 2.2.6 を使っており、両立しません。
+
+```
+File "/opt/ros/jazzy/.../cv_bridge/__init__.py", line 6
+  from cv_bridge.boost.cv_bridge_boost import cvtColorForDisplay, getCvType
+ImportError: A module that was compiled using NumPy 1.x cannot be run in NumPy 2.2.6
+```
+
+★ **いちばん質が悪いのは、これが黙ることです。** `cv_bridge/__init__.py` は
+この ImportError を `try/except: pass` で握り潰します。だから `import cv_bridge` は
+通り、`CvBridge()` の生成も通り、**`imgmsg_to_cv2()` を呼んだ瞬間に SIGSEGV** です。
+
+> numpy 2.2.6 で壊れる ROS のモジュールは**調べた範囲で `cv_bridge` だけ**です。
+> `sensor_msgs.msg` / `sensor_msgs_py.point_cloud2` / `tf2_ros` / `tf2_py` /
+> `tf2_geometry_msgs` / `laser_geometry` / `nav_msgs.msg` はすべて動きます。
+
+#### 代わりにこう書く
+
+`cv_bridge` がやっているのは、エンコーディングを見て `bytes` を numpy に
+整形することだけです。依存なしで書けます。
+
+```python
+import numpy as np
+
+_ENCODINGS = {
+    "bgr8": (np.uint8, 3), "rgb8": (np.uint8, 3),
+    "mono8": (np.uint8, 1), "mono16": (np.uint16, 1),
+    "16UC1": (np.uint16, 1), "32FC1": (np.float32, 1),
+}
+
+
+def imgmsg_to_np(msg):
+    """sensor_msgs/Image -> numpy (OpenCV と同じ BGR 並び)。"""
+    dtype, channels = _ENCODINGS[msg.encoding]
+    array = np.frombuffer(msg.data, dtype=dtype)
+    if channels > 1:
+        array = array.reshape(msg.height, msg.width, channels)
+    else:
+        array = array.reshape(msg.height, msg.width)
+    # ★ cv2 と YOLO は BGR を期待する。rgb8 のときだけ入れ替える。
+    return array[..., ::-1] if msg.encoding == "rgb8" else array
+```
+
+`CompressedImage` なら 1 行です。
+
+```python
+img = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
+```
+
+**YOLO に渡すには結局 numpy 配列が要る**ので、`cv_bridge` を経由する意味は
+そもそもありません。
+
+---
 
 ### パラメータを使う
 
@@ -345,6 +420,10 @@ A. discovery が終わる前に publisher が終了しています。`-w 1`（�
 **Q. ブランチを切り替えたら colcon build が `can't copy '...': doesn't exist` で落ちる**
 A. `--symlink-install` の壊れたリンクが `build/` に残っています。
 `make bootstrap` が検出して作り直します。
+
+**Q. 画像を扱うノードが Segmentation fault で落ちる**
+A. `cv_bridge` を使っていませんか。numpy 2 系と非互換で、`import` は通るのに
+実行時に SIGSEGV します。[画像を扱う](#画像を扱うcv_bridge-を使わないこと)を参照。
 
 **Q. リーチが `REJECTED_WRONG_FRAME` になる**
 A. RViz の **Fixed Frame を `map`** にしてください。"Publish Point" は
