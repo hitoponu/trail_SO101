@@ -1,12 +1,11 @@
-# LeKiwi + SO-101 リーチ機能 — 使い方と実機検証項目
-
-ブランチ: `feat/lekiwi-so101-reach`
+# リーチ機能の設計と精度
 
 LeKiwi 移動ベースに SO-101 アームを載せ、**`map` 座標系に固定された点へ手先を伸ばす**機能です。
 RViz で点をクリックすると、アームがそこへ届きます。
 
-このドキュメントは概要です。運用の詳細は
-[`docker/lekiwi_so101_bringup/README.md`](../docker/lekiwi_so101_bringup/README.md) を参照してください。
+> ★ **使い方は [`../README.md`](../README.md) と [`interfaces.md`](interfaces.md) にあります。**
+> このファイルは「なぜ数 cm ずれるのか」「実機で何を確定させる必要があるか」を扱います。
+> 解き方の仕組みは [`internals.md`](internals.md#リーチはどう解いているのか)。
 
 ---
 
@@ -22,77 +21,6 @@ RViz で点をクリックすると、アームがそこへ届きます。
 
 **精度は数 cm です。**「クリックした点の数 cm 以内に手先を持っていく」もの、
 と考えてください。理由は後述します。
-
----
-
-## 使い方
-
-### 1. 準備（初回のみ）
-
-```bash
-cd docker/lekiwi_so101_bringup
-cp .env.example .env          # ★ デバイス名と DIALOUT_GID を実機に合わせる
-make build
-make bootstrap                # ★ 必須。飛ばすと起動できない
-```
-
-> **`make bootstrap` は省略できません。**
-> このイメージは ROS ワークスペースを焼き込まず、ホストからマウントします。
-> `ros2_ws/install` と `ros2_ws/src/ros2_so_arm` は `.gitignore` 済みで
-> `git pull` では降ってきません。飛ばすと
-> `Package 'lekiwi_so101_bringup' not found` になります。
->
-> `bootstrap` は最後に静的検査を 3 つ走らせます。3 つとも `OK` にならなければ
-> そこで止めてください。
-
-### 2. 起動
-
-```bash
-make mock     # 実機に触れない（Mac でも動く）
-make reach    # 実機
-```
-
-実機は `backend:=lerobot` と較正 ID の指定が要ります。詳細は運用 README を参照。
-
-### 3. 目標を与える
-
-**RViz の "Publish Point" ツールでクリックする**のがいちばん簡単です。
-
-> ★ RViz の **Fixed Frame を `map`** にしてください。
-> Publish Point は Fixed Frame の座標で publish するので、`odom` のままだと
-> `REJECTED_WRONG_FRAME` で弾かれます。
-
-コマンドラインからも与えられます。
-
-```bash
-docker exec lekiwi-so101-arm /entrypoint.sh \
-  ros2 topic pub --once /so101/reach_target geometry_msgs/msg/PoseStamped \
-    '{header: {frame_id: map}, pose: {position: {x: 0.35, y: 0.05, z: 0.25}, orientation: {w: 1.0}}}'
-```
-
-結果は `/so101/reach_status` に 1 行ずつ出ます。RViz には目標球が出ます
-（**緑 = 受理 / 赤 = 棄却**）。
-
-```
-ACCEPTED   target=map(0.350,0.050,0.250) iters=10 residual=0.0006 dur=1.2
-SUCCEEDED  residual_fk=0.0007
-```
-
-届かない場合は、**どの関節が可動限界に張り付いたか**まで出ます。
-「遠すぎる」のか「ベースを回せば届く」のかが区別できます。
-
-```
-REJECTED_UNREACHABLE residual=0.0912 status=STALLED pinned=['arm_shoulder_lift_joint']
-```
-
-### 4. 停止
-
-**★ 順番を守ってください。正常終了でトルクが切れてアームが落ちます。**
-
-```bash
-make stow     # 1. アームを低く畳む
-make down     # 2. bridgeをshutdownしてトルクOFF後、コンテナを停止
-```
 
 ---
 
@@ -194,11 +122,12 @@ A-1 と A-2 の測り方は [`docs/agent/request.md`](agent/request.md) の手�
 
 ## 運用上の注意
 
-- **アームのコンテナを再起動すると、slam が `map`→`odom` を出さなくなります。**
-  結合ロボットの `robot_state_publisher` がアーム側に居るためです。
-  自動では戻らないので、**ベース側も再起動**してください
-- アームのブリッジが故障した場合は、アームだけが脱力します。
-  RSP は生き残るのでベースの測位は失われません
+- アームのブリッジが故障した場合は、**アームだけが脱力します**。
+  `robot_state_publisher` は生き残るのでベースの測位は失われません
+  （`shutdown_on_bridge_exit:=false`）
+- 統合スタック（`docker/robot`）は 1 プロセスなので、launch を上げ直せば全部戻ります。
+  旧 4 コンテナ構成にあった「アームのコンテナを再起動すると slam が
+  `map`→`odom` を出さなくなる」問題は**起きません**
 
 ---
 
@@ -206,8 +135,10 @@ A-1 と A-2 の測り方は [`docs/agent/request.md`](agent/request.md) の手�
 
 | 内容 | 場所 |
 | --- | --- |
-| 運用の詳細・故障モード・状態メッセージ一覧 | [`docker/lekiwi_so101_bringup/README.md`](../docker/lekiwi_so101_bringup/README.md) |
-| 実機での測定手順（手順 0〜4） | [`docs/agent/request.md`](agent/request.md) |
-| 実機担当者向けの安全区分・非常停止 | [`docs/hardware_agent.md`](hardware_agent.md) |
-| SO-101 アーム単体 | [`docker/so101_ros2/README.md`](../docker/so101_ros2/README.md) |
-| LeKiwi ベース単体 | [`docker/lekiwi_base_ros2/README.md`](../docker/lekiwi_base_ros2/README.md) |
+| 使い方の手順 | [`../README.md`](../README.md) |
+| トピック・状態メッセージ一覧・CLI テスト | [`interfaces.md`](interfaces.md) |
+| ソルバの仕組み | [`internals.md`](internals.md#リーチはどう解いているのか) |
+| TF のどこが信用できないか | [`tf_reliability.md`](tf_reliability.md) |
+| 停止・非常停止・復帰 | [`../docker/robot/README.md`](../docker/robot/README.md) |
+| 実機での測定手順 | [`agent/request.md`](agent/request.md) |
+| 実機担当者向けの安全区分 | [`hardware_agent.md`](hardware_agent.md) |

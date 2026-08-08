@@ -193,23 +193,13 @@ make check
 
 ## インターフェース・CLI テストコマンド
 
-**トピック / アクション / サービスの一覧と CLI テストは
-[`../lekiwi_so101_bringup/README.md`](../lekiwi_so101_bringup/README.md) と同じ。**
-リーチの状態コード、精度の話、既知のリスクもそちらにまとまっている。
+**→ [`../../docs/interfaces.md`](../../docs/interfaces.md)**
 
-統合後に変わるのは前置きだけ:
+トピック / サービス / アクションの一覧、リーチの状態コード、
+CLI テストコマンドはすべてそちらにまとめてある（統合スタック前提で、
+モックで実在を確認済み）。
 
-```bash
-E="docker compose exec robot /entrypoint.sh"        # 実機
-E="docker compose exec robot-mock /entrypoint.sh"   # モック
-```
-
-> ★ **`/entrypoint.sh` の前置は必須。** `docker exec` は ENTRYPOINT を通らないので、
-> 付けないと `ros2: executable file not found in $PATH` になる。
->
-> ★ 旧 README にある「Nav2 のアクションは `$N`（ベースのコンテナ）で叩くこと」は
-> **統合後は不要**。`nav2_msgs` も `control_msgs` も同じイメージに入っているので、
-> どのコマンドも同じ前置きで叩ける。
+このディレクトリの README は**起動と停止**に絞ってある。
 
 ## 検証状況
 
@@ -217,9 +207,9 @@ E="docker compose exec robot-mock /entrypoint.sh"   # モック
 
 | # | 内容 | 結果 |
 | --- | --- | --- |
-| M-1 | イメージが 1 つビルドできる | OK。`local/lekiwi-so101:jazzy` **7.81GB**（旧 so101 4.96GB + lekiwi-base 4.75GB） |
+| M-1 | イメージが 1 つビルドできる | OK。`local/lekiwi-so101:jazzy` **7.85GB**（旧 so101 4.96GB + lekiwi-base 4.75GB。上流を焼き込んで +0.04GB） |
 | M-2 | 全パッケージが 1 ワークスペースでビルドできる | OK。**9 パッケージ**（`so_arm_utils` `so_arm101_description` `sllidar_ros2` `so101_bringup` `lekiwi_description` `lekiwi_base_bringup` `lekiwi_so101_bringup` `rplidar_bringup` `realsense_bringup`） |
-| M-3 | pip の numpy 2.2.6 でベース側のテストが通る | OK。`lekiwi_base_bringup` **70 件**を含む全 **122 件** pass |
+| M-3 | pip の numpy 2.2.6 でベース側のテストが通る | OK。`lekiwi_base_bringup` **70 件**を含む全 **136 件** pass |
 | M-4 | コンテナが 1 つ | OK。`docker ps` が 1 行 |
 | M-5 | `map → arm_gripper_frame_link` / `map → wrist_camera_depth_optical_frame` | OK。`(0.471, -0.000, 0.315)` / `(0.394, -0.071, 0.323)` |
 | M-6 | `/robot_description`=1、`/joint_states`=2、コントローラ 3 つ active | OK |
