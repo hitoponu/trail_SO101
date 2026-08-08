@@ -84,7 +84,7 @@ ros2 run lekiwi_examples teleop_keyboard
 > アームは可動域の内側でクランプしますが、**機体との干渉は見ていません**。
 > LiDAR やプレートに当たりえます。
 
-**ベース**（`teleop_twist_keyboard` と同じ並び。★ オムニなので真横にも動けます）
+**ベース**（★ オムニなので真横にも動けます）
 
 ```
   u  i  o        i / ,   前後
@@ -93,6 +93,23 @@ ros2 run lekiwi_examples teleop_keyboard
                  k       停止
                  [ / ]   その場で旋回
 ```
+
+> ## ★ `teleop_twist_keyboard` とは `j` / `l` の意味が違います
+>
+> | キー | `teleop_twist_keyboard` | このノード |
+> | --- | --- | --- |
+> | `j` / `l` | **旋回** | **左右（strafe）** |
+> | `J` / `L`（Shift） | 左右（strafe） | 未割当 |
+> | `[` / `]` | 未割当 | 旋回 |
+>
+> このベースはオムニで真横に動けるので、Shift の要らない押しやすいキーを
+> strafe に割り当てています。
+>
+> **`teleop_twist_keyboard` を動かしていると「`j`/`l` で旋回する」ことになりますが、
+> それは仕様で、機体の故障ではありません。** 実際に一度取り違えました
+> （2026-08-08。車輪の較正を疑って 48 通り総当たりする羽目になりました）。
+> `docker/lekiwi_base_ros2/README.md` や `base.launch.py` が
+> `teleop_twist_keyboard` を案内しているので、混ざりやすいです。
 
 **アーム**（上段が +、下段が −。1 キーで 0.05 rad）
 

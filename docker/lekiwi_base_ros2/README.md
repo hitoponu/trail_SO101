@@ -372,6 +372,21 @@ docker compose exec -it lekiwi-base /entrypoint.sh \
 横移動:   Shift を押しながら（ホロノミックモード）
 ```
 
+> ## ★ `j` / `l` は**旋回**です（横移動ではありません）
+>
+> `teleop_twist_keyboard` では小文字 `j`/`l` が `angular.z`、
+> **横移動は大文字 `J`/`L`（Shift）**です。オムニだからと `j` を押すと
+> その場で回ります。**機体の故障ではありません。**
+>
+> 統合スタック（`docker/robot`）には**横移動を `j`/`l` に置いた自作ノード**が
+> あります。そちらのほうがこのベースには自然です。
+>
+> ```bash
+> ros2 run lekiwi_examples teleop_keyboard   # j/l = strafe, [/] = 旋回
+> ```
+>
+> → [`ros2_ws/src/lekiwi_examples/README.md`](../../ros2_ws/src/lekiwi_examples/README.md)
+
 **既定の `speed:=0.5` から始めないでください。** 0.1 → 0.2 と徐々に上げます。
 
 ### 速度の上限について
