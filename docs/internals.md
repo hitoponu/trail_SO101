@@ -344,7 +344,14 @@ slam_toolbox が死んでも凍った `map → odom` を返し続けるので、
 > ベースのドライバも道連れになり、ホイールが回り続けます。
 > **非常停止は物理スイッチだけ**です。
 >
-> 異常終了からの復帰は `ros2 run lekiwi_so101_bringup release_all`。
+> 異常終了からの復帰は `ros2 run lekiwi_so101_bringup release_all`
+> （`make release`）。**アームもホイールもこれ 1 つ**で解放する。
+>
+> ★ **コンテナを落とす必要はない。** 止まっている必要があるのは launch だけで、
+> いちばん多い「launch だけ落ちてコンテナは生きている」場合はそのまま叩ける。
+> バスを触ってよいかは `release_all` が `/proc` を見て**ポートごとに**判定し、
+> 掴んでいるプロセスが居ればその名前を出して中止する。
+>
 > 詳細は [`../docker/robot/README.md`](../docker/robot/README.md)。
 
 ### ★ アームの起動時にも一瞬トルクが抜けます

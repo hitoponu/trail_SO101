@@ -307,3 +307,4 @@ $E ros2 topic pub --once -w 1 /so101/reach_target geometry_msgs/msg/PoseStamped 
 | TF のどこが信用できないか | [`tf_reliability.md`](tf_reliability.md) |
 | リーチの精度 | [`lekiwi_so101_reach.md`](lekiwi_so101_reach.md) |
 | 停止・非常停止・異常終了からの復帰 | [`../docker/robot/README.md`](../docker/robot/README.md) |
+| launch が落ちたときの復帰 | `make release`（コンテナは落とさなくてよい） |

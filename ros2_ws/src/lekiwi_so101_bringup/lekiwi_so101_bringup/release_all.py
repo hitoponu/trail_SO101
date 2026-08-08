@@ -41,6 +41,7 @@ ROS のノードは死んでいる前提なので、このコマンドは **ROS 
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import sys
 
@@ -100,8 +101,48 @@ class Outcome:
                 print(f"   ID {motor_id}: Torque_Enable={value}  (★ トルクが入っている)")
 
 
+def port_holder(port: str) -> str | None:
+    """このポートを**いま開いているプロセス**を返す。誰も開いていなければ None。
+
+    ★ なぜ要るのか
+      Feetech のバスは半二重で、マスタは 1 つしか居られない。ROS のノードが
+      ポートを開いたまま release_all が読み書きすると**パケットが混線し、
+      ブリッジが通信異常と判定してトルクを切る**（＝アームがその場で落ちる）。
+
+    ★ なぜ「コンテナが動いているか」で判定しないのか
+      いちばん多い故障は「**launch だけが落ちて、コンテナは生きている**」。
+      このときポートは空いているので、**コンテナを落とさずに解放できる**のが
+      正しい挙動。コンテナの有無で断ると、この一番ありふれた場合に
+      復帰手段が使えなくなる（実際にそう作ってしまい、直したのがこれ）。
+
+    /proc を舐めるだけで lsof や fuser に依存しない。コンテナからは
+    自分のコンテナのプロセスしか見えないので、判定範囲もちょうどよい
+    （compose.yaml は pid: host を使っていない）。
+    """
+    real = os.path.realpath(port)
+    self_pid = str(os.getpid())
+    for proc in glob.glob("/proc/[0-9]*"):
+        pid = os.path.basename(proc)
+        if pid == self_pid:
+            continue
+        try:
+            for fd in glob.glob(f"{proc}/fd/*"):
+                if os.path.realpath(fd) != real:
+                    continue
+                try:
+                    raw = open(f"{proc}/cmdline", "rb").read()
+                except OSError:
+                    raw = b""
+                cmd = raw.replace(b"\0", b" ").decode(errors="replace").strip()
+                return f"PID {pid}" + (f" ({cmd})" if cmd else "")
+        except OSError:
+            # プロセスが読み取り中に消えるのは普通のこと。無視して次へ。
+            continue
+    return None
+
+
 def diagnose_port(port: str) -> str | None:
-    """ポートを開けない理由を人間向けに返す。開けそうなら None。"""
+    """ポートを触れない理由を人間向けに返す。触ってよさそうなら None。"""
     if not os.path.exists(port):
         return (
             f"{port} が存在しない。udev ルールが当たっているか、"
@@ -109,6 +150,16 @@ def diagnose_port(port: str) -> str | None:
         )
     if not os.access(port, os.R_OK | os.W_OK):
         return f"{port} に読み書き権限が無い (dialout グループの GID を確認)"
+    holder = port_holder(port)
+    if holder is not None:
+        return (
+            f"{port} は {holder} が開いています。\n"
+            "      Feetech のバスはマスタが 1 つだけ。ここで触ると混線し、\n"
+            "      ブリッジが通信異常と判定してトルクを切ります"
+            "（★ アームがその場で落ちます）。\n"
+            "      先に launch を止めてから実行すること"
+            "（コンテナは落とさなくて構いません）。"
+        )
     return None
 
 
@@ -139,9 +190,9 @@ def release_bus(
         #   「何をすればいいか」を出さなければならない。握って助言に変える。
         outcome.error = (
             f"{type(exc).__name__}: {exc}\n"
-            "      ROS のノードがまだポートを掴んでいる可能性が高い。\n"
-            "      先にコンテナを止めてから実行すること:\n"
-            "        docker compose down"
+            "      ポートは開いていないのに接続できませんでした。\n"
+            "      配線・電源・ボーレート・ポート名を確認すること\n"
+            "      (誰かが掴んでいる場合は diagnose_port が先に検出します)。"
         )
         return outcome
 

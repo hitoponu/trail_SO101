@@ -5,7 +5,9 @@
 読み戻して 0 だった ID だけを成功として扱うこと。
 """
 
+import subprocess
 import sys
+import time
 import types
 
 import pytest
@@ -19,6 +21,7 @@ from lekiwi_so101_bringup.release_all import (  # noqa: E402
     WHEEL_IDS,
     Outcome,
     diagnose_port,
+    port_holder,
 )
 
 
@@ -92,8 +95,12 @@ def test_missing_port_is_diagnosed():
     assert "存在しない" in reason
 
 
-def test_existing_writable_port_passes():
-    assert diagnose_port("/dev/null") is None
+def test_existing_writable_port_passes(tmp_path):
+    """★ /dev/null は使えない。コンテナ内では多数のプロセスが開いており、
+    port_holder が正しく「掴まれている」と判定するため。"""
+    port = tmp_path / "writable"
+    port.touch()
+    assert diagnose_port(str(port)) is None
 
 
 def test_id_sets_match_the_hardware():
@@ -142,3 +149,68 @@ def test_dry_run_distinguishes_engaged_from_unreadable():
     assert not engaged.released and classify(engaged)
     assert not unreadable.released and not classify(unreadable)
     assert released.released
+
+
+# ── ポートを掴んでいるプロセスの検出 ────────────────────────────────
+#
+# ★ ここが「launch だけ落ちてコンテナは生きている」場合に効く。
+#   以前は Makefile が「コンテナが動いていたら中止」としており、
+#   **いちばんありふれた故障で復帰手段が使えなかった**。
+
+
+def test_no_holder_when_nobody_has_it_open(tmp_path):
+    port = tmp_path / "free_port"
+    port.touch()
+    assert port_holder(str(port)) is None
+
+
+def test_open_file_is_detected(tmp_path):
+    """★ 別プロセスが掴んでいる場合を検出すること。
+
+    自分自身の fd は除外する仕様なので、テストも別プロセスで掴ませる
+    （実際に防ぎたいのは「ROS のノードが掴んでいる」状況）。
+    """
+    port = tmp_path / "busy_port"
+    port.touch()
+    with open(port) as handle:
+        proc = subprocess.Popen(["sleep", "30"], stdin=handle)
+        try:
+            time.sleep(0.5)
+            holder = port_holder(str(port))
+        finally:
+            proc.kill()
+            proc.wait()
+    assert holder is not None, "別プロセスが開いているのに検出できていない"
+    assert holder.startswith("PID ")
+    assert str(proc.pid) in holder
+
+
+def test_not_detected_after_close(tmp_path):
+    port = tmp_path / "reopened_port"
+    port.touch()
+    open(port).close()
+    assert port_holder(str(port)) is None
+
+
+def test_held_port_is_refused_by_diagnose_port(tmp_path):
+    """★ これが本体。混線でアームが落ちるのを防ぐ。"""
+    port = tmp_path / "held_port"
+    port.touch()
+    with open(port) as handle:
+        proc = subprocess.Popen(["sleep", "30"], stdin=handle)
+        try:
+            time.sleep(0.5)
+            reason = diagnose_port(str(port))
+        finally:
+            proc.kill()
+            proc.wait()
+    assert reason is not None
+    assert "が開いています" in reason
+    # ★「コンテナを落とせ」と言わないこと。落とす必要は無い。
+    assert "コンテナは落とさなくて構いません" in reason
+
+
+def test_free_port_passes_diagnose_port(tmp_path):
+    port = tmp_path / "open_port"
+    port.touch()
+    assert diagnose_port(str(port)) is None

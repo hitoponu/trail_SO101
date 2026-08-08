@@ -276,14 +276,18 @@ make down
 
 停止処理が走らなかった場合、**サーボは指令を保持したままです。**
 
+**★ コンテナを落とす必要はありません。** 止まっている必要があるのは launch だけです。
+
 ```bash
 # Linux PC（実機）
 cd docker/robot
-make down             # ★ 先に。ROS が生きているとシリアルポートを掴んでいます
 make release-check    # 読むだけ。いまトルクが入っているか確認
+make release          # ★ アームもホイールもこれ 1 つで解放（★ アームが落ちます）
 make release-wheels   # ホイールだけ止める（アームは落ちない）
-make release          # ホイールを止めてアームのトルクも切る（★ アームが落ちます）
 ```
+
+> ★ launch がまだ生きている場合は、**どのプロセスがポートを掴んでいるかを
+> 名指しして中止します**。その場合は先に launch を `Ctrl+C` してください。
 
 詳細は [`docker/robot/README.md`](docker/robot/README.md)。
 

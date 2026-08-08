@@ -202,6 +202,10 @@ docker compose -f compose.yaml down
 docker ps -a --format '{{.Names}}'     # robot が残っていないこと
 ```
 
+> ★ `docker kill` はコンテナごと落とすので、ここでは片付けが要ります。
+> **launch だけが落ちてコンテナが生きている場合は、この手順は不要です**
+> （`make release*` はコンテナが動いていてもそのまま通ります）。
+
 #### 2-d. ★ トルクがまだ入っていることを読む
 
 ```bash
