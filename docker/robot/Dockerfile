@@ -134,31 +134,35 @@ RUN mkdir -p /opt/upstream \
 
 WORKDIR /ros2_ws
 
-# ── Python の実行依存 ─────────────────────────────────────────────────
+# ── Python の実行依存 (uv + venv) ─────────────────────────────────────
 # アームのハードウェア通信・較正・モータ設定はすべて LeRobot 経由。
 # Feetech SDK や feetech_ros2_driver に直接依存を足さないこと。
 #
-# ★ ベースのドライバ (lekiwi_base_bringup/sts_bus.py) だけは例外で
-#   scservo_sdk を直叩きする。lerobot[feetech] が引く feetech-servo-sdk が
-#   その import 名を提供するので、追加の pip install は要らない。
-#   バージョン制約は lerobot 0.5.1 が feetech-servo-sdk<2.0.0,>=1.0.0、
-#   sts_bus.py の setPacketTimeout モンキーパッチは 1.0.0 系を前提としている。
-#   両者を満たすよう 1.0.0 に固定する。
+# ★ なぜ venv なのか
+#   これから YOLO (ultralytics / opencv) のような重い依存が増える。
+#   pip で system Python へ直に入れると dpkg 管理のパッケージと衝突し、
+#   --break-system-packages と「numpy を /usr/local で影にする」といった
+#   回避策が積み上がる。venv なら中身が uv.lock で固定される。
 #
-# ★ Ubuntu の packaging / numpy は dpkg 管理で pip から upgrade できないので、
-#   この 2 つだけ先に /usr/local へ shadow する。
-#   統合により lekiwi_base_bringup と rplidar_bringup もこの numpy 2.2.6 で
-#   動くことになる (以前は dpkg の 1.26 系だった)。削除済み API
-#   (np.float_ / np.NaN 等) の使用が無いことは確認済み。
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --timeout 120 --break-system-packages --ignore-installed --no-deps \
-      "packaging==25.0" "numpy==2.2.6" \
-    && pip install --timeout 120 --break-system-packages \
-      "lerobot[feetech]==0.5.1" \
-    && pip install --timeout 120 --break-system-packages \
-      "feetech-servo-sdk==1.0.0" \
-    && pip install --timeout 120 --break-system-packages \
-      "setuptools<80"
+# ★ venv は /ros2_ws の**外**に置くこと。
+#   compose.yaml が ../../ros2_ws:/ros2_ws を bind mount するので、
+#   /ros2_ws 配下に置くと実行時に完全に隠れる (実測確認済み)。
+#
+# ★ ROS の Python (rclpy / sensor_msgs / nav2_msgs …) は venv に入れない。
+#   PyPI に無く apt でしか入らないので、PYTHONPATH 経由で借りる。
+#   entrypoint.sh が「ROS を source → venv を activate」の順で用意する。
+#   この順序だと sys.path は PYTHONPATH → venv になり、
+#     rclpy / メッセージ型 → /opt/ros/jazzy   (apt)
+#     numpy / lerobot / yaml → /opt/venv      (uv)
+#     自作パッケージ         → /ros2_ws/install (colcon)
+#   と解決される (実測で確認)。
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY docker/robot/pyproject.toml docker/robot/uv.lock /opt/robot-venv/
+ENV UV_LINK_MODE=copy VIRTUAL_ENV=/opt/venv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    cd /opt/robot-venv \
+    && uv venv /opt/venv \
+    && uv sync --frozen --active --no-install-project
 
 # ソースと colcon の build/install/log は compose.yaml でホストから
 # /ros2_ws にマウントする。取得・パッチ適用・ビルドは bootstrap.sh に
@@ -175,9 +179,11 @@ RUN chmod +x /entrypoint.sh
 #   対話シェル (docker compose exec -it robot bash) 用に bashrc でも source しておく。
 #   単発コマンドは /entrypoint.sh を前置すること:
 #       docker compose exec robot /entrypoint.sh ros2 topic list
+#   ★ 順序は entrypoint.sh と同じ (ROS -> ワークスペース -> venv)。
 RUN printf '%s\n' \
       'source /opt/ros/jazzy/setup.bash' \
       'if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi' \
+      'if [ -f /opt/venv/bin/activate ]; then source /opt/venv/bin/activate; fi' \
       >> /etc/bash.bashrc
 
 ENTRYPOINT ["/entrypoint.sh"]

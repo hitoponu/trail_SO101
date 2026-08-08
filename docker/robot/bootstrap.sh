@@ -104,7 +104,13 @@ echo "== ビルドします =="
 #   除外するのは上流 ros2_so_arm に同梱されている SO-ARM100 系だけ。
 #   so_arm_gz は Gazebo、so_arm100_moveit_config は MoveIt を要求するが、
 #   どちらもこのイメージに入っていない (この機体は SO-101 なので使わない)。
-colcon build --symlink-install \
+# ★ `colcon` ではなく `python3 -m colcon` で呼ぶこと。
+#   PATH 上の colcon が apt 版 (/usr/bin/colcon) だと sys.executable が
+#   /usr/bin/python3 になり、console_script の shebang がそこを指す。
+#   すると `ros2 run` したノードが venv を見ず、scservo_sdk や lerobot が
+#   import できずに落ちる (実測)。python3 は venv のものなので、
+#   -m で呼べば shebang は /opt/venv/bin/python3 になる。
+python3 -m colcon build --symlink-install \
   --packages-ignore so_arm_gz so_arm100_description so_arm100_moveit_config
 
 # ★ Dockerfile にあった静的スモークテストの移設先。

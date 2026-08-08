@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -e
 
+# ★★ この 3 つの順序が重要。入れ替えないこと。
+#
+#   ① ROS          … PYTHONPATH に /opt/ros/jazzy が入る
+#   ② ワークスペース … PYTHONPATH に /ros2_ws/install/* が入る
+#   ③ venv         … ★ 最後。lerobot / numpy / yaml / (将来 YOLO)
+#
+#   sys.path は「PYTHONPATH → venv の site-packages」の順になるので、
+#   ROS のものは apt から、Python 依存は venv から解決される。
+#   ③ を先にすると PYTHONPATH が後付けになり、同名パッケージの
+#   優先順位が変わる。
 source /opt/ros/jazzy/setup.bash
 
 # ホストからマウントした ros2_ws は、初回だけ install 空間が存在しない。
@@ -11,6 +21,14 @@ else
   echo "警告: /ros2_ws/install/setup.bash がありません。" >&2
   echo "      先にワークスペースを初期化してください:" >&2
   echo "        cd docker/robot && make bootstrap" >&2
+fi
+
+# ③ Python 依存 (uv が /opt/venv へ入れたもの)
+if [ -f /opt/venv/bin/activate ]; then
+  source /opt/venv/bin/activate
+else
+  echo "警告: /opt/venv がありません。イメージが古い可能性があります。" >&2
+  echo "      make build からやり直してください。" >&2
 fi
 
 if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
